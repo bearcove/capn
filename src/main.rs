@@ -18,6 +18,9 @@ use toml_edit::{Array, DocumentMut, Item, Table, Value};
 mod readme;
 mod utils;
 
+// Embed schema for zero-execution discovery by Styx tooling
+styx_embed::embed_file!("schema.styx");
+
 use utils::{TaskProgress, dir_size, format_size, run_command_with_spinner};
 
 fn terminal_supports_color(stream: ColorStream) -> bool {
@@ -2406,12 +2409,9 @@ fn main() {
     // Parse CLI arguments
     let args: Vec<String> = std::env::args().collect();
 
-    // Handle @dump-styx-schema for schema discovery
+    // Handle @dump-styx-schema for schema discovery (legacy, keeping for now)
     if args.len() > 1 && args[1] == "@dump-styx-schema" {
-        print!(
-            "{}",
-            styx_schema::generate::to_styx_schema::<CaptainConfig>()
-        );
+        print!("{}", facet_styx::schema_from_type::<CaptainConfig>());
         return;
     }
 

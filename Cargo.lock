@@ -25,6 +25,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d902e3d592a523def97af8f317b08ce16b7ab854c1985a0c671e6f15cebc236"
 
 [[package]]
+name = "arrayref"
+version = "0.3.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "76a2e8124351fda1ef8aaaa3bbd7ebbcb486bbcd4225aca0aa0d84bb2db8fecb"
+
+[[package]]
+name = "arrayvec"
+version = "0.7.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
+
+[[package]]
 name = "autocfg"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -35,6 +47,20 @@ name = "bitflags"
 version = "2.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "812e12b5285cc515a9c72a5c1d3b6d46a19dac5acfef5265968c166106e31dd3"
+
+[[package]]
+name = "blake3"
+version = "1.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2468ef7d57b3fb7e16b576e8377cdbde2320c60e1491e961d11da40fc4f02a2d"
+dependencies = [
+ "arrayref",
+ "arrayvec",
+ "cc",
+ "cfg-if",
+ "constant_time_eq",
+ "cpufeatures",
+]
 
 [[package]]
 name = "bumpalo"
@@ -69,7 +95,7 @@ dependencies = [
  "rayon",
  "serde_json",
  "strip-ansi-escapes",
- "styx-schema",
+ "styx-embed",
  "supports-color",
  "toml_edit",
  "walkdir",
@@ -100,6 +126,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "cc"
+version = "1.2.53"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "755d2fce177175ffca841e9a06afdb2c4ab0f593d53b4dee48147dfaade85932"
+dependencies = [
+ "find-msvc-tools",
+ "shlex",
+]
+
+[[package]]
 name = "cfg-if"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -125,10 +161,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32b13ea120a812beba79e34316b3942a857c86ec1593cb34f27bb28272ce2cca"
 
 [[package]]
+name = "constant_time_eq"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d52eff69cd5e647efe296129160853a42795992097e8af39800e1060caeea9b"
+
+[[package]]
 name = "countme"
 version = "3.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7704b5fdd17b18ae31c4c1da5a2e0305a2bf17b5249300a9ee9ed7b72114c636"
+
+[[package]]
+name = "cpufeatures"
+version = "0.2.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "59ed5838eebb26a2bb2e58f6d5b5316989ae9d08bab10e0e6d103e656d1b0280"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "crossbeam-deque"
@@ -323,7 +374,7 @@ dependencies = [
 [[package]]
 name = "facet-styx"
 version = "0.1.0"
-source = "git+https://github.com/bearcove/styx?branch=main#27c899fcac82b6aad67cd683d072fa5c75a6015a"
+source = "git+https://github.com/bearcove/styx?branch=main#cc4277a2d5fef04928b13eec1433a12f45bb8c37"
 dependencies = [
  "ariadne",
  "facet-core",
@@ -345,6 +396,12 @@ dependencies = [
  "log",
  "saphyr-parser",
 ]
+
+[[package]]
+name = "find-msvc-tools"
+version = "0.1.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8591b0bcc8a98a64310a2fae1bb3e9b8564dd10e381e6e28010fde8e8e8568db"
 
 [[package]]
 name = "foldhash"
@@ -502,6 +559,15 @@ name = "log"
 version = "0.4.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
+
+[[package]]
+name = "lz4_flex"
+version = "0.11.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "08ab2867e3eeeca90e844d1940eab391c9dc5228783db2ed999acbc0a9ed375a"
+dependencies = [
+ "twox-hash",
+]
 
 [[package]]
 name = "memchr"
@@ -720,6 +786,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "shlex"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
+
+[[package]]
 name = "strip-ansi-escapes"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -737,16 +809,37 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 [[package]]
 name = "styx-cst"
 version = "0.1.0"
-source = "git+https://github.com/bearcove/styx?branch=main#27c899fcac82b6aad67cd683d072fa5c75a6015a"
+source = "git+https://github.com/bearcove/styx?branch=main#cc4277a2d5fef04928b13eec1433a12f45bb8c37"
 dependencies = [
  "rowan",
  "styx-parse",
 ]
 
 [[package]]
+name = "styx-embed"
+version = "0.1.0"
+source = "git+https://github.com/bearcove/styx?branch=main#cc4277a2d5fef04928b13eec1433a12f45bb8c37"
+dependencies = [
+ "blake3",
+ "lz4_flex",
+ "styx-embed-macros",
+]
+
+[[package]]
+name = "styx-embed-macros"
+version = "0.1.0"
+source = "git+https://github.com/bearcove/styx?branch=main#cc4277a2d5fef04928b13eec1433a12f45bb8c37"
+dependencies = [
+ "blake3",
+ "lz4_flex",
+ "proc-macro2",
+ "unsynn",
+]
+
+[[package]]
 name = "styx-format"
 version = "0.1.0"
-source = "git+https://github.com/bearcove/styx?branch=main#27c899fcac82b6aad67cd683d072fa5c75a6015a"
+source = "git+https://github.com/bearcove/styx?branch=main#cc4277a2d5fef04928b13eec1433a12f45bb8c37"
 dependencies = [
  "rowan",
  "styx-cst",
@@ -757,26 +850,12 @@ dependencies = [
 [[package]]
 name = "styx-parse"
 version = "0.1.0"
-source = "git+https://github.com/bearcove/styx?branch=main#27c899fcac82b6aad67cd683d072fa5c75a6015a"
-
-[[package]]
-name = "styx-schema"
-version = "0.1.0"
-source = "git+https://github.com/bearcove/styx?branch=main#27c899fcac82b6aad67cd683d072fa5c75a6015a"
-dependencies = [
- "ariadne",
- "facet",
- "facet-styx",
- "serde_json",
- "styx-format",
- "styx-parse",
- "styx-tree",
-]
+source = "git+https://github.com/bearcove/styx?branch=main#cc4277a2d5fef04928b13eec1433a12f45bb8c37"
 
 [[package]]
 name = "styx-tree"
 version = "0.1.0"
-source = "git+https://github.com/bearcove/styx?branch=main#27c899fcac82b6aad67cd683d072fa5c75a6015a"
+source = "git+https://github.com/bearcove/styx?branch=main#cc4277a2d5fef04928b13eec1433a12f45bb8c37"
 dependencies = [
  "ariadne",
  "styx-parse",
@@ -896,6 +975,12 @@ name = "toml_writer"
 version = "1.0.6+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab16f14aed21ee8bfd8ec22513f7287cd4a91aa92e44edfe2c17ddd004e92607"
+
+[[package]]
+name = "twox-hash"
+version = "2.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ea3136b675547379c4bd395ca6b938e5ad3c3d20fad76e7fe85f9e0d011419c"
 
 [[package]]
 name = "unicode-ident"
