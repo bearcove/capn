@@ -2409,12 +2409,6 @@ fn main() {
     // Parse CLI arguments
     let args: Vec<String> = std::env::args().collect();
 
-    // Handle @dump-styx-schema for schema discovery (legacy, keeping for now)
-    if args.len() > 1 && args[1] == "@dump-styx-schema" {
-        print!("{}", facet_styx::schema_from_type::<CaptainConfig>());
-        return;
-    }
-
     if args.len() > 1 && args[1] == "pre-push" {
         run_pre_push();
         return;
