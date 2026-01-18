@@ -181,7 +181,7 @@ The hooks are installed to the main repo and all worktrees.
 Captain is configured via `.config/captain/config.styx`:
 
 ```styx
-@schema crate:captain@1
+@schema {source crate:captain-cli@1, cli captain}
 
 // Captain configuration
 // All options default to true. Set to false to disable.

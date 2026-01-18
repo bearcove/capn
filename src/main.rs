@@ -334,6 +334,16 @@ enum ConfigFormat {
     Yaml,
 }
 
+/// Strip @schema directive from config content.
+/// The @schema directive is metadata for editors/LSPs, not actual config data.
+fn strip_schema_directive(content: &str) -> String {
+    content
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("@schema"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn load_captain_config() -> CaptainConfig {
     let captain_dir = std::env::current_dir().unwrap().join(".config/captain");
     let styx_path = captain_dir.join("config.styx");
@@ -401,6 +411,9 @@ fn load_captain_config() -> CaptainConfig {
     if content.trim().is_empty() {
         return CaptainConfig::default();
     }
+
+    // Strip @schema directive (metadata for editors, not data)
+    let content = strip_schema_directive(&content);
 
     match format {
         ConfigFormat::Styx => match facet_styx::from_str(&content) {
@@ -2200,7 +2213,7 @@ echo "All hooks installed successfully."
             fs::create_dir_all(&templates_dir).expect("Failed to create captain config directory");
 
             // Create default config.styx
-            let config_content = r#"@schema crate:captain@1
+            let config_content = r#"@schema {source crate:captain-cli@1, cli captain}
 
 // Captain configuration
 // All options default to true. Set to false to disable.

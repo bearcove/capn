@@ -1,4 +1,4 @@
-@schema crate:captain@1
+@schema {source crate:captain-cli@1, cli captain}
 
 // Captain configuration
 // All options default to true unless noted. Set to false to disable.
