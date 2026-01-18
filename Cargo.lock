@@ -81,10 +81,9 @@ dependencies = [
 name = "captain"
 version = "1.1.0"
 dependencies = [
+ "captain-config",
  "cargo_metadata",
  "dirs",
- "facet",
- "facet-default",
  "facet-styx",
  "facet-yaml",
  "fs-err",
@@ -99,6 +98,14 @@ dependencies = [
  "supports-color",
  "toml_edit",
  "walkdir",
+]
+
+[[package]]
+name = "captain-config"
+version = "0.1.0"
+dependencies = [
+ "facet",
+ "facet-default",
 ]
 
 [[package]]
@@ -374,7 +381,7 @@ dependencies = [
 [[package]]
 name = "facet-styx"
 version = "0.1.0"
-source = "git+https://github.com/bearcove/styx?branch=main#cc4277a2d5fef04928b13eec1433a12f45bb8c37"
+source = "git+https://github.com/bearcove/styx?branch=main#d3ec8b41deff23f8c02ff022b93290f71562c954"
 dependencies = [
  "ariadne",
  "facet-core",
@@ -809,7 +816,7 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 [[package]]
 name = "styx-cst"
 version = "0.1.0"
-source = "git+https://github.com/bearcove/styx?branch=main#cc4277a2d5fef04928b13eec1433a12f45bb8c37"
+source = "git+https://github.com/bearcove/styx?branch=main#d3ec8b41deff23f8c02ff022b93290f71562c954"
 dependencies = [
  "rowan",
  "styx-parse",
@@ -818,7 +825,7 @@ dependencies = [
 [[package]]
 name = "styx-embed"
 version = "0.1.0"
-source = "git+https://github.com/bearcove/styx?branch=main#cc4277a2d5fef04928b13eec1433a12f45bb8c37"
+source = "git+https://github.com/bearcove/styx?branch=main#d3ec8b41deff23f8c02ff022b93290f71562c954"
 dependencies = [
  "blake3",
  "lz4_flex",
@@ -828,7 +835,7 @@ dependencies = [
 [[package]]
 name = "styx-embed-macros"
 version = "0.1.0"
-source = "git+https://github.com/bearcove/styx?branch=main#cc4277a2d5fef04928b13eec1433a12f45bb8c37"
+source = "git+https://github.com/bearcove/styx?branch=main#d3ec8b41deff23f8c02ff022b93290f71562c954"
 dependencies = [
  "blake3",
  "lz4_flex",
@@ -839,7 +846,7 @@ dependencies = [
 [[package]]
 name = "styx-format"
 version = "0.1.0"
-source = "git+https://github.com/bearcove/styx?branch=main#cc4277a2d5fef04928b13eec1433a12f45bb8c37"
+source = "git+https://github.com/bearcove/styx?branch=main#d3ec8b41deff23f8c02ff022b93290f71562c954"
 dependencies = [
  "rowan",
  "styx-cst",
@@ -850,12 +857,12 @@ dependencies = [
 [[package]]
 name = "styx-parse"
 version = "0.1.0"
-source = "git+https://github.com/bearcove/styx?branch=main#cc4277a2d5fef04928b13eec1433a12f45bb8c37"
+source = "git+https://github.com/bearcove/styx?branch=main#d3ec8b41deff23f8c02ff022b93290f71562c954"
 
 [[package]]
 name = "styx-tree"
 version = "0.1.0"
-source = "git+https://github.com/bearcove/styx?branch=main#cc4277a2d5fef04928b13eec1433a12f45bb8c37"
+source = "git+https://github.com/bearcove/styx?branch=main#d3ec8b41deff23f8c02ff022b93290f71562c954"
 dependencies = [
  "ariadne",
  "styx-parse",

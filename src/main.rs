@@ -19,7 +19,9 @@ mod readme;
 mod utils;
 
 // Embed schema for zero-execution discovery by Styx tooling
-styx_embed::embed_file!("schema.styx");
+styx_embed::embed_outdir_file!("schema.styx");
+
+use captain_config::CaptainConfig;
 
 use utils::{TaskProgress, dir_size, format_size, run_command_with_spinner};
 
@@ -279,57 +281,6 @@ fn check_edition_2024(metadata: &cargo_metadata::Metadata) {
         error!("Set edition = \"2024\" in the above location(s) to proceed.");
         std::process::exit(1);
     }
-}
-
-/// Configuration read from `.config/captain/config.styx`
-#[derive(Debug, facet::Facet)]
-#[facet(derive(Default), traits(Default))]
-#[facet(rename_all = "kebab-case")]
-struct CaptainConfig {
-    #[facet(default)]
-    pre_commit: PreCommitConfig,
-
-    #[facet(default)]
-    pre_push: PrePushConfig,
-}
-
-#[derive(Debug, facet::Facet)]
-#[facet(rename_all = "kebab-case", traits(Default), derive(Default))]
-struct PreCommitConfig {
-    #[facet(default = true)]
-    generate_readmes: bool,
-    #[facet(default = true)]
-    rustfmt: bool,
-    #[facet(default = true)]
-    cargo_lock: bool,
-    #[facet(default = true)]
-    arborium: bool,
-    #[facet(default = true)]
-    edition_2024: bool,
-}
-
-#[derive(Debug, facet::Facet)]
-#[facet(rename_all = "kebab-case", traits(Default), derive(Default))]
-struct PrePushConfig {
-    #[facet(default = true)]
-    clippy: bool,
-    /// Features to use for clippy. If None, uses --all-features.
-    #[facet(default)]
-    clippy_features: Option<Vec<String>>,
-    #[facet(default = true)]
-    nextest: bool,
-    #[facet(default = false)]
-    doc_tests: bool,
-    /// Features to use for doc tests. If None, uses --all-features.
-    #[facet(default)]
-    doc_test_features: Option<Vec<String>>,
-    #[facet(default = true)]
-    docs: bool,
-    /// Features to use for docs. If None, uses --all-features.
-    #[facet(default)]
-    docs_features: Option<Vec<String>>,
-    #[facet(default = true)]
-    cargo_shear: bool,
 }
 
 enum ConfigFormat {

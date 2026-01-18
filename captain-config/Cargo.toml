@@ -1,0 +1,16 @@
+[package]
+name = "captain-config"
+version = "0.1.0"
+edition = "2024"
+
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
+[dependencies]
+facet = { git = "https://github.com/facet-rs/facet", branch = "main" }
+facet-default = { git = "https://github.com/facet-rs/facet", branch = "main" }
+
+[package.metadata.cargo-shear]
+ignored = ["facet-default"]
