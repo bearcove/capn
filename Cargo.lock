@@ -69,6 +69,7 @@ dependencies = [
  "rayon",
  "serde_json",
  "strip-ansi-escapes",
+ "styx-schema",
  "supports-color",
  "toml_edit",
  "walkdir",
@@ -757,6 +758,20 @@ dependencies = [
 name = "styx-parse"
 version = "0.1.0"
 source = "git+https://github.com/bearcove/styx?branch=main#27c899fcac82b6aad67cd683d072fa5c75a6015a"
+
+[[package]]
+name = "styx-schema"
+version = "0.1.0"
+source = "git+https://github.com/bearcove/styx?branch=main#27c899fcac82b6aad67cd683d072fa5c75a6015a"
+dependencies = [
+ "ariadne",
+ "facet",
+ "facet-styx",
+ "serde_json",
+ "styx-format",
+ "styx-parse",
+ "styx-tree",
+]
 
 [[package]]
 name = "styx-tree"

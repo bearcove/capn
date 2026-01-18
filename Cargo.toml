@@ -24,6 +24,7 @@ dirs = "6"
 facet = { git = "https://github.com/facet-rs/facet", branch = "main" }
 facet-default = { git = "https://github.com/facet-rs/facet", branch = "main" }
 facet-styx = { git = "https://github.com/bearcove/styx", branch = "main" }
+styx-schema = { git = "https://github.com/bearcove/styx", branch = "main" }
 facet-yaml = { git = "https://github.com/facet-rs/facet", branch = "main" }
 miette = { version = "7", default-features = false, features = ["fancy-no-backtrace"] }
 fs-err = "3.2.2"

@@ -2200,7 +2200,9 @@ echo "All hooks installed successfully."
             fs::create_dir_all(&templates_dir).expect("Failed to create captain config directory");
 
             // Create default config.styx
-            let config_content = r#"// Captain configuration
+            let config_content = r#"@schema crate:captain@1
+
+// Captain configuration
 // All options default to true. Set to false to disable.
 
 pre-commit {
@@ -2390,6 +2392,16 @@ fn main() {
 
     // Parse CLI arguments
     let args: Vec<String> = std::env::args().collect();
+
+    // Handle @dump-styx-schema for schema discovery
+    if args.len() > 1 && args[1] == "@dump-styx-schema" {
+        print!(
+            "{}",
+            styx_schema::generate::to_styx_schema::<CaptainConfig>()
+        );
+        return;
+    }
+
     if args.len() > 1 && args[1] == "pre-push" {
         run_pre_push();
         return;
