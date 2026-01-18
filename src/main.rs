@@ -278,7 +278,7 @@ fn check_edition_2024(metadata: &cargo_metadata::Metadata) {
     }
 }
 
-/// Configuration read from `.config/captain/config.yaml`
+/// Configuration read from `.config/captain/config.styx`
 #[derive(Debug, facet::Facet)]
 #[facet(derive(Default), traits(Default))]
 #[facet(rename_all = "kebab-case")]
@@ -329,48 +329,65 @@ struct PrePushConfig {
     cargo_shear: bool,
 }
 
-fn get_config_path() -> PathBuf {
-    std::env::current_dir()
-        .unwrap()
-        .join(".config/captain/config.yaml")
+enum ConfigFormat {
+    Styx,
+    Yaml,
 }
 
 fn load_captain_config() -> CaptainConfig {
-    let config_path = get_config_path();
     let captain_dir = std::env::current_dir().unwrap().join(".config/captain");
+    let styx_path = captain_dir.join("config.styx");
+    let yaml_path = captain_dir.join("config.yaml");
 
     // Check for old KDL config and error out
     let old_kdl_path = captain_dir.join("config.kdl");
     if old_kdl_path.exists() {
         error!(
             "Found old KDL config file at {}\n\
-             Captain now uses YAML configuration.\n\
-             Please migrate your config.kdl to config.yaml and remove the .kdl file.\n\
-             See the README for the new YAML syntax.",
+             Captain now uses Styx configuration.\n\
+             Please migrate your config.kdl to config.styx and remove the .kdl file.\n\
+             See the README for the Styx syntax.",
             old_kdl_path.display()
         );
         std::process::exit(1);
     }
 
-    // Check for config.yml (we standardize on .yaml)
+    // Check for config.yml (we standardize on .yaml for legacy, .styx for new)
     let yml_path = captain_dir.join("config.yml");
     if yml_path.exists() {
         error!(
             "Found config.yml at {}\n\
-             Captain uses config.yaml (not .yml).\n\
-             Please rename config.yml to config.yaml.",
+             Captain uses config.styx (or config.yaml for legacy).\n\
+             Please rename config.yml to config.styx.",
             yml_path.display()
         );
         std::process::exit(1);
     }
 
-    if !config_path.exists() {
-        debug!(
-            "No config file at {}, using defaults",
-            config_path.display()
+    // Error if both .styx and .yaml exist
+    if styx_path.exists() && yaml_path.exists() {
+        error!(
+            "Found both config.styx and config.yaml in {}\n\
+             Please remove config.yaml and keep only config.styx.",
+            captain_dir.display()
         );
-        return CaptainConfig::default();
+        std::process::exit(1);
     }
+
+    // Determine which config file to use
+    let (config_path, format) = if styx_path.exists() {
+        (styx_path, ConfigFormat::Styx)
+    } else if yaml_path.exists() {
+        warn!(
+            "Using deprecated config.yaml at {}\n\
+             Please migrate to config.styx. The YAML format will be removed in a future version.",
+            yaml_path.display()
+        );
+        (yaml_path, ConfigFormat::Yaml)
+    } else {
+        debug!("No config file at {}, using defaults", styx_path.display());
+        return CaptainConfig::default();
+    };
 
     let content = match fs::read_to_string(&config_path) {
         Ok(c) => c,
@@ -385,12 +402,21 @@ fn load_captain_config() -> CaptainConfig {
         return CaptainConfig::default();
     }
 
-    match facet_yaml::from_str(&content) {
-        Ok(config) => config,
-        Err(e) => {
-            error!("Failed to parse {}:\n{e}", config_path.display());
-            std::process::exit(1);
-        }
+    match format {
+        ConfigFormat::Styx => match facet_styx::from_str(&content) {
+            Ok(config) => config,
+            Err(e) => {
+                error!("Failed to parse {}:\n{e}", config_path.display());
+                std::process::exit(1);
+            }
+        },
+        ConfigFormat::Yaml => match facet_yaml::from_str(&content) {
+            Ok(config) => config,
+            Err(e) => {
+                error!("Failed to parse {}:\n{e}", config_path.display());
+                std::process::exit(1);
+            }
+        },
     }
 }
 
@@ -2160,49 +2186,47 @@ echo "All hooks installed successfully."
         println!("  {} Created conductor.json", "✔".green());
     }
 
-    // 3. Create .config/captain/ directory with config.yaml and templates
+    // 3. Create .config/captain/ directory with config.styx and templates
     println!();
     let captain_dir = workspace_dir.join(".config/captain");
-    let config_path = captain_dir.join("config.yaml");
+    let config_path = captain_dir.join("config.styx");
     let templates_dir = captain_dir.join("readme-templates");
 
     if !captain_dir.exists() {
         if prompt_yes_no(
-            "Create .config/captain/ with config.yaml and readme templates?",
+            "Create .config/captain/ with config.styx and readme templates?",
             true,
         ) {
             fs::create_dir_all(&templates_dir).expect("Failed to create captain config directory");
 
-            // Create default config.yaml
-            let config_content = r#"# Captain configuration
-# All options default to true. Set to false to disable.
+            // Create default config.styx
+            let config_content = r#"// Captain configuration
+// All options default to true. Set to false to disable.
 
-pre-commit:
-  # generate-readmes: false
-  # rustfmt: false
-  # cargo-lock: false
-  # arborium: false
-  # edition-2024: false
+pre-commit {
+  // generate-readmes false
+  // rustfmt false
+  // cargo-lock false
+  // arborium false
+  // edition-2024 false
+}
 
-pre-push:
-  # clippy: false
-  # nextest: false
-  # doc-tests: false
-  # docs: false
-  # cargo-shear: false
+pre-push {
+  // clippy false
+  // nextest false
+  // doc-tests false
+  // docs false
+  // cargo-shear false
 
-  # Feature configuration (uncomment and customize as needed)
-  # clippy-features:
-  #   - feature1
-  #   - feature2
-  # doc-test-features:
-  #   - feature1
-  # docs-features:
-  #   - feature1
+  // Feature configuration (uncomment and customize as needed)
+  // clippy-features (feature1 feature2)
+  // doc-test-features (feature1)
+  // docs-features (feature1)
+}
 "#;
-            fs::write(&config_path, config_content).expect("Failed to write config.yaml");
+            fs::write(&config_path, config_content).expect("Failed to write config.styx");
             files_created.push(config_path);
-            println!("  {} Created .config/captain/config.yaml", "✔".green());
+            println!("  {} Created .config/captain/config.styx", "✔".green());
 
             // Create empty header/footer templates
             let header_path = templates_dir.join("readme-header.md");

@@ -66,7 +66,7 @@ This interactively creates:
 - `hooks/` directory with pre-commit and pre-push hooks
 - `hooks/install.sh` to install the hooks
 - `conductor.json` for [Conductor](https://www.conductor.build/) setup (optional)
-- `.config/captain/config.yaml` configuration file
+- `.config/captain/config.styx` configuration file
 - `.config/captain/readme-templates/` with empty header/footer templates
 - `README.md.in` template (if not present)
 
@@ -184,32 +184,30 @@ The hooks are installed to the main repo and all worktrees.
 
 ## Configuration
 
-Captain is configured via `.config/captain/config.yaml`:
+Captain is configured via `.config/captain/config.styx`:
 
-```/dev/null/config.yaml#L1-20
-# Captain configuration
-# All options default to true. Set to false to disable.
+```styx
+// Captain configuration
+// All options default to true. Set to false to disable.
 
-pre-commit:
-  generate-readmes: false
-  rustfmt: false
-  cargo-lock: false
+pre-commit {
+  generate-readmes false
+  rustfmt false
+  cargo-lock false
+}
 
-pre-push:
-  clippy: false
-  nextest: false
-  doc-tests: false
-  docs: false
-  cargo-shear: false
+pre-push {
+  clippy false
+  nextest false
+  doc-tests false
+  docs false
+  cargo-shear false
 
-  # Feature configuration
-  clippy-features:
-    - feature1
-    - feature2
-  doc-test-features:
-    - feature1
-  docs-features:
-    - feature1
+  // Feature configuration
+  clippy-features (feature1 feature2)
+  doc-test-features (feature1)
+  docs-features (feature1)
+}
 ```
 
 ### Available Options

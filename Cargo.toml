@@ -21,9 +21,10 @@ ignored = ["facet-default"]
 [dependencies]
 cargo_metadata = "0.23.1"
 dirs = "6"
-facet = { git = "https://github.com/facet-rs/facet" }
-facet-default = { git = "https://github.com/facet-rs/facet" }
-facet-yaml = { git = "https://github.com/facet-rs/facet" }
+facet = { git = "https://github.com/facet-rs/facet", branch = "main" }
+facet-default = { git = "https://github.com/facet-rs/facet", branch = "main" }
+facet-styx = { git = "https://github.com/bearcove/styx", branch = "main" }
+facet-yaml = { git = "https://github.com/facet-rs/facet", branch = "main" }
 miette = { version = "7", default-features = false, features = ["fancy-no-backtrace"] }
 fs-err = "3.2.2"
 log = { version = "0.4.29", features = ["std"] }
