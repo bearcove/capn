@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Skill(gh-cli)"
+      "Skill(gh-cli)",
+      "mcp__acp__Bash"
     ]
   }
 }

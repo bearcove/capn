@@ -265,7 +265,7 @@ dependencies = [
 [[package]]
 name = "facet"
 version = "0.42.0"
-source = "git+https://github.com/facet-rs/facet?branch=main#b2b7829bca980772180c3614d1163d749b6af84c"
+source = "git+https://github.com/facet-rs/facet?branch=main#13ec8b4a7e0472d3a913f8bcf7cedcafa29b290f"
 dependencies = [
  "autocfg",
  "facet-core",
@@ -275,7 +275,7 @@ dependencies = [
 [[package]]
 name = "facet-core"
 version = "0.42.0"
-source = "git+https://github.com/facet-rs/facet?branch=main#b2b7829bca980772180c3614d1163d749b6af84c"
+source = "git+https://github.com/facet-rs/facet?branch=main#13ec8b4a7e0472d3a913f8bcf7cedcafa29b290f"
 dependencies = [
  "autocfg",
  "const-fnv1a-hash",
@@ -294,7 +294,7 @@ dependencies = [
 [[package]]
 name = "facet-dessert"
 version = "0.42.0"
-source = "git+https://github.com/facet-rs/facet?branch=main#b2b7829bca980772180c3614d1163d749b6af84c"
+source = "git+https://github.com/facet-rs/facet?branch=main#13ec8b4a7e0472d3a913f8bcf7cedcafa29b290f"
 dependencies = [
  "facet-core",
  "facet-reflect",
@@ -303,7 +303,7 @@ dependencies = [
 [[package]]
 name = "facet-format"
 version = "0.42.0"
-source = "git+https://github.com/facet-rs/facet?branch=main#b2b7829bca980772180c3614d1163d749b6af84c"
+source = "git+https://github.com/facet-rs/facet?branch=main#13ec8b4a7e0472d3a913f8bcf7cedcafa29b290f"
 dependencies = [
  "facet-core",
  "facet-dessert",
@@ -315,7 +315,7 @@ dependencies = [
 [[package]]
 name = "facet-macro-parse"
 version = "0.42.0"
-source = "git+https://github.com/facet-rs/facet?branch=main#b2b7829bca980772180c3614d1163d749b6af84c"
+source = "git+https://github.com/facet-rs/facet?branch=main#13ec8b4a7e0472d3a913f8bcf7cedcafa29b290f"
 dependencies = [
  "facet-macro-types",
  "proc-macro2",
@@ -325,7 +325,7 @@ dependencies = [
 [[package]]
 name = "facet-macro-types"
 version = "0.42.0"
-source = "git+https://github.com/facet-rs/facet?branch=main#b2b7829bca980772180c3614d1163d749b6af84c"
+source = "git+https://github.com/facet-rs/facet?branch=main#13ec8b4a7e0472d3a913f8bcf7cedcafa29b290f"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -335,7 +335,7 @@ dependencies = [
 [[package]]
 name = "facet-macros"
 version = "0.42.0"
-source = "git+https://github.com/facet-rs/facet?branch=main#b2b7829bca980772180c3614d1163d749b6af84c"
+source = "git+https://github.com/facet-rs/facet?branch=main#13ec8b4a7e0472d3a913f8bcf7cedcafa29b290f"
 dependencies = [
  "facet-macros-impl",
 ]
@@ -343,7 +343,7 @@ dependencies = [
 [[package]]
 name = "facet-macros-impl"
 version = "0.42.0"
-source = "git+https://github.com/facet-rs/facet?branch=main#b2b7829bca980772180c3614d1163d749b6af84c"
+source = "git+https://github.com/facet-rs/facet?branch=main#13ec8b4a7e0472d3a913f8bcf7cedcafa29b290f"
 dependencies = [
  "facet-macro-parse",
  "facet-macro-types",
@@ -356,7 +356,7 @@ dependencies = [
 [[package]]
 name = "facet-path"
 version = "0.42.0"
-source = "git+https://github.com/facet-rs/facet?branch=main#b2b7829bca980772180c3614d1163d749b6af84c"
+source = "git+https://github.com/facet-rs/facet?branch=main#13ec8b4a7e0472d3a913f8bcf7cedcafa29b290f"
 dependencies = [
  "facet-core",
 ]
@@ -364,7 +364,7 @@ dependencies = [
 [[package]]
 name = "facet-reflect"
 version = "0.42.0"
-source = "git+https://github.com/facet-rs/facet?branch=main#b2b7829bca980772180c3614d1163d749b6af84c"
+source = "git+https://github.com/facet-rs/facet?branch=main#13ec8b4a7e0472d3a913f8bcf7cedcafa29b290f"
 dependencies = [
  "facet-core",
 ]
@@ -372,7 +372,7 @@ dependencies = [
 [[package]]
 name = "facet-solver"
 version = "0.42.0"
-source = "git+https://github.com/facet-rs/facet?branch=main#b2b7829bca980772180c3614d1163d749b6af84c"
+source = "git+https://github.com/facet-rs/facet?branch=main#13ec8b4a7e0472d3a913f8bcf7cedcafa29b290f"
 dependencies = [
  "facet-core",
  "facet-reflect",
@@ -381,6 +381,7 @@ dependencies = [
 [[package]]
 name = "facet-styx"
 version = "0.1.0"
+source = "git+https://github.com/bearcove/styx?branch=main#900c4f736c99f715f1b69127092e427400dc10be"
 dependencies = [
  "ariadne",
  "facet",
@@ -864,6 +865,7 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 [[package]]
 name = "styx-cst"
 version = "0.1.0"
+source = "git+https://github.com/bearcove/styx?branch=main#900c4f736c99f715f1b69127092e427400dc10be"
 dependencies = [
  "rowan",
  "styx-parse",
@@ -872,7 +874,7 @@ dependencies = [
 [[package]]
 name = "styx-embed"
 version = "0.1.0"
-source = "git+https://github.com/bearcove/styx?branch=main#77ba4c66793f99f7f29e9503d65a620df8c00f5b"
+source = "git+https://github.com/bearcove/styx?branch=main#900c4f736c99f715f1b69127092e427400dc10be"
 dependencies = [
  "blake3",
  "goblin",
@@ -884,7 +886,7 @@ dependencies = [
 [[package]]
 name = "styx-embed-macros"
 version = "0.1.0"
-source = "git+https://github.com/bearcove/styx?branch=main#77ba4c66793f99f7f29e9503d65a620df8c00f5b"
+source = "git+https://github.com/bearcove/styx?branch=main#900c4f736c99f715f1b69127092e427400dc10be"
 dependencies = [
  "blake3",
  "lz4_flex",
@@ -895,6 +897,7 @@ dependencies = [
 [[package]]
 name = "styx-format"
 version = "0.1.0"
+source = "git+https://github.com/bearcove/styx?branch=main#900c4f736c99f715f1b69127092e427400dc10be"
 dependencies = [
  "rowan",
  "styx-cst",
@@ -905,10 +908,12 @@ dependencies = [
 [[package]]
 name = "styx-parse"
 version = "0.1.0"
+source = "git+https://github.com/bearcove/styx?branch=main#900c4f736c99f715f1b69127092e427400dc10be"
 
 [[package]]
 name = "styx-tree"
 version = "0.1.0"
+source = "git+https://github.com/bearcove/styx?branch=main#900c4f736c99f715f1b69127092e427400dc10be"
 dependencies = [
  "ariadne",
  "styx-parse",

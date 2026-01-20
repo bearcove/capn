@@ -7,48 +7,73 @@
 #[facet(derive(Default), traits(Default))]
 #[facet(rename_all = "kebab-case")]
 pub struct CaptainConfig {
+    /// Configuration for pre-commit hooks.
     #[facet(default)]
     pub pre_commit: PreCommitConfig,
 
+    /// Configuration for pre-push hooks.
     #[facet(default)]
     pub pre_push: PrePushConfig,
 }
 
+/// Configuration for pre-commit hooks.
 #[derive(Debug, facet::Facet)]
 #[facet(rename_all = "kebab-case", traits(Default), derive(Default))]
 pub struct PreCommitConfig {
+    /// Generate `README.md` files from `README.md.in` templates.
     #[facet(default = true)]
     pub generate_readmes: bool,
+
+    /// Format staged Rust files with `rustfmt`.
     #[facet(default = true)]
     pub rustfmt: bool,
+
+    /// Stage `Cargo.lock` changes automatically.
     #[facet(default = true)]
     pub cargo_lock: bool,
+
+    /// Create `arborium-header.html` files for enhanced rustdoc syntax highlighting.
     #[facet(default = true)]
     pub arborium: bool,
+
+    /// Require Rust edition 2024 in all workspace crates.
     #[facet(default = true)]
     pub edition_2024: bool,
 }
 
+/// Configuration for pre-push hooks.
 #[derive(Debug, facet::Facet)]
 #[facet(rename_all = "kebab-case", traits(Default), derive(Default))]
 pub struct PrePushConfig {
+    /// Run `cargo clippy` with warnings as errors.
     #[facet(default = true)]
     pub clippy: bool,
-    /// Features to use for clippy. If None, uses --all-features.
+
+    /// Features to pass to clippy. If `None`, uses `--all-features`.
     #[facet(default)]
     pub clippy_features: Option<Vec<String>>,
+
+    /// Run tests via `cargo nextest`.
     #[facet(default = true)]
     pub nextest: bool,
+
+    /// Run documentation tests via `cargo test --doc`.
     #[facet(default = false)]
     pub doc_tests: bool,
-    /// Features to use for doc tests. If None, uses --all-features.
+
+    /// Features to pass to doc tests. If `None`, uses `--all-features`.
     #[facet(default)]
     pub doc_test_features: Option<Vec<String>>,
+
+    /// Build documentation with `cargo doc` and treat warnings as errors.
     #[facet(default = true)]
     pub docs: bool,
-    /// Features to use for docs. If None, uses --all-features.
+
+    /// Features to pass to rustdoc. If `None`, uses `--all-features`.
     #[facet(default)]
     pub docs_features: Option<Vec<String>>,
+
+    /// Check for unused dependencies with `cargo-shear`.
     #[facet(default = true)]
     pub cargo_shear: bool,
 }
