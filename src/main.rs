@@ -2167,7 +2167,7 @@ echo "All hooks installed successfully."
             fs::create_dir_all(&templates_dir).expect("Failed to create captain config directory");
 
             // Create default config.styx
-            let config_content = r#"@schema {source crate:captain-cli@1, cli captain}
+            let config_content = r#"@schema {id crate:captain-config@1, cli captain}
 
 // Captain configuration
 // All options default to true. Set to false to disable.
