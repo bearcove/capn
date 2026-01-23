@@ -394,13 +394,26 @@ fn enqueue_readme_jobs(
     metadata: &cargo_metadata::Metadata,
 ) {
     let workspace_dir = std::env::current_dir().unwrap();
-    let entries = match fs_err::read_dir(&workspace_dir) {
-        Ok(e) => e,
-        Err(e) => {
-            error!("Failed to read workspace directory ({e})");
-            return;
+
+    // Collect crate directories from workspace root and crates/ subdirectory
+    let mut crate_dirs: Vec<PathBuf> = Vec::new();
+
+    // Scan workspace root
+    if let Ok(entries) = fs_err::read_dir(&workspace_dir) {
+        for entry in entries.flatten() {
+            crate_dirs.push(entry.path());
         }
-    };
+    }
+
+    // Also scan crates/ subdirectory if it exists
+    let crates_subdir = workspace_dir.join("crates");
+    if crates_subdir.is_dir()
+        && let Ok(entries) = fs_err::read_dir(&crates_subdir)
+    {
+        for entry in entries.flatten() {
+            crate_dirs.push(entry.path());
+        }
+    }
 
     let template_name = "README.md.in";
 
@@ -518,20 +531,10 @@ fn enqueue_readme_jobs(
         }
     };
 
-    for entry in entries {
-        let entry = match entry {
-            Ok(entry) => entry,
-            Err(e) => {
-                warn!("Skipping entry: {e}");
-                continue;
-            }
-        };
-        let crate_path = entry.path();
-
+    for crate_path in crate_dirs {
         if !crate_path.is_dir()
             || crate_path.file_name().is_some_and(|name| {
-                let name = name.to_string_lossy();
-                name.starts_with('.') || name.starts_with('_')
+                name.to_string_lossy().starts_with('.') || name.to_string_lossy().starts_with('_')
             })
         {
             continue;
