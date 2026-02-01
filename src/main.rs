@@ -1,3 +1,7 @@
+use captain_config::CaptainConfig;
+use facet::Facet;
+use facet_styx::StyxFormat;
+use figue::{self as args, Driver};
 use log::{Level, LevelFilter, Log, Metadata, Record, debug, error};
 use owo_colors::{OwoColorize, Style};
 use std::sync::mpsc;
@@ -12,7 +16,6 @@ use supports_color::{self, Stream as ColorStream};
 
 mod checks;
 mod commands;
-mod config;
 mod jobs;
 mod readme;
 mod utils;
@@ -23,11 +26,44 @@ styx_embed::embed_outdir_file!("schema.styx");
 use checks::{check_edition_2024, check_external_path_deps};
 pub use commands::debug_packages;
 use commands::{run_init, run_pre_push, show_and_apply_jobs};
-use config::load_captain_config;
 use jobs::{
     Job, enqueue_arborium_jobs, enqueue_cargo_lock_jobs, enqueue_readme_jobs, enqueue_rustfmt_jobs,
 };
 use utils::TaskProgress;
+
+/// Git pre-commit and pre-push hooks for Rust projects.
+#[derive(Facet, Debug)]
+struct Args {
+    /// Standard CLI options (--help, --version, --completions)
+    #[facet(flatten)]
+    builtins: args::FigueBuiltins,
+
+    /// Command to run (defaults to pre-commit)
+    #[facet(default, args::subcommand)]
+    command: Option<Commands>,
+
+    /// Configuration (from .config/captain/config.styx)
+    #[facet(args::config)]
+    config: CaptainConfig,
+}
+
+/// Available commands
+#[derive(Facet, Debug)]
+#[repr(u8)]
+enum Commands {
+    /// Run pre-commit checks (default when no command specified)
+    PreCommit {
+        /// Template directory for README generation
+        #[facet(default, args::named)]
+        template_dir: Option<PathBuf>,
+    },
+    /// Run pre-push checks
+    PrePush,
+    /// Initialize captain hooks in the repository
+    Init,
+    /// Debug package detection
+    DebugPackages,
+}
 
 fn terminal_supports_color(stream: ColorStream) -> bool {
     supports_color::on_cached(stream).is_some()
@@ -84,34 +120,41 @@ fn main() {
         }
     }
 
-    // Parse CLI arguments
-    let args: Vec<String> = std::env::args().collect();
+    // Parse config from CLI args and config file using figue
+    let figue_config = args::builder::<Args>()
+        .expect("failed to create figue builder")
+        .cli(|c| c.args(std::env::args().skip(1)))
+        .file(|f| {
+            f.format(StyxFormat)
+                .default_paths([".config/captain/config.styx"])
+        })
+        .help(|h| {
+            h.program_name("captain")
+                .description("Git pre-commit and pre-push hooks for Rust projects")
+                .version(env!("CARGO_PKG_VERSION"))
+        })
+        .build();
 
-    if args.len() > 1 && args[1] == "pre-push" {
-        run_pre_push();
-        return;
-    }
-    if args.len() > 1 && args[1] == "init" {
-        run_init();
-        return;
-    }
-    if args.len() > 1 && args[1] == "debug-packages" {
-        debug_packages();
-        return;
-    }
+    let args: Args = Driver::new(figue_config).run().unwrap();
 
-    // Parse --template-dir argument
-    let mut template_dir: Option<PathBuf> = None;
-    let mut i = 1;
-    while i < args.len() {
-        if args[i] == "--template-dir" && i + 1 < args.len() {
-            template_dir = Some(PathBuf::from(&args[i + 1]));
-            i += 2;
-        } else {
-            i += 1;
+    // Dispatch to the appropriate command
+    match args.command {
+        Some(Commands::PrePush) => {
+            run_pre_push(args.config);
+        }
+        Some(Commands::Init) => {
+            run_init();
+        }
+        Some(Commands::DebugPackages) => {
+            debug_packages();
+        }
+        Some(Commands::PreCommit { template_dir }) | None => {
+            run_pre_commit(args.config, template_dir);
         }
     }
+}
 
+fn run_pre_commit(config: CaptainConfig, template_dir: Option<PathBuf>) {
     let staged_files = match collect_staged_files() {
         Ok(sf) => sf,
         Err(e) => {
@@ -122,9 +165,6 @@ fn main() {
             std::process::exit(1);
         }
     };
-
-    // Load captain config
-    let config = load_captain_config();
 
     // Create progress tracker with spinners
     let progress = TaskProgress::new();
@@ -338,228 +378,4 @@ fn setup_logger() {
     let logger = Box::new(SimpleLogger);
     log::set_boxed_logger(logger).unwrap();
     log::set_max_level(LevelFilter::Trace);
-}
-
-#[cfg(test)]
-mod tests {
-    use captain_config::CaptainConfig;
-
-    fn parse_config(yaml: &str) -> CaptainConfig {
-        facet_yaml::from_str(yaml).unwrap()
-    }
-
-    #[test]
-    fn empty_config_uses_defaults() {
-        // Empty YAML document (just empty object)
-        let config: CaptainConfig = parse_config("{}");
-        assert!(config.pre_commit.generate_readmes);
-        assert!(config.pre_commit.rustfmt);
-        assert!(config.pre_commit.cargo_lock);
-        assert!(config.pre_commit.arborium);
-        assert!(config.pre_commit.edition_2024);
-        assert!(config.pre_push.clippy);
-        assert!(config.pre_push.nextest);
-        assert!(!config.pre_push.doc_tests);
-        assert!(config.pre_push.docs);
-        assert!(config.pre_push.cargo_shear);
-        assert!(config.pre_push.clippy_features.is_none());
-        assert!(config.pre_push.doc_test_features.is_none());
-        assert!(config.pre_push.docs_features.is_none());
-    }
-
-    #[test]
-    fn empty_blocks_use_defaults() {
-        let yaml = r#"
-pre-commit: {}
-pre-push: {}
-"#;
-        let config: CaptainConfig = parse_config(yaml);
-        assert!(config.pre_commit.generate_readmes);
-        assert!(config.pre_push.clippy);
-    }
-
-    #[test]
-    fn disable_pre_commit_options() {
-        let yaml = r#"
-pre-commit:
-  generate-readmes: false
-  rustfmt: false
-  cargo-lock: false
-"#;
-        let config: CaptainConfig = parse_config(yaml);
-        assert!(!config.pre_commit.generate_readmes);
-        assert!(!config.pre_commit.rustfmt);
-        assert!(!config.pre_commit.cargo_lock);
-        // Others still default to true
-        assert!(config.pre_commit.arborium);
-        assert!(config.pre_commit.edition_2024);
-    }
-
-    #[test]
-    fn disable_pre_push_options() {
-        let yaml = r#"
-pre-push:
-  clippy: false
-  nextest: false
-  doc-tests: false
-  docs: false
-  cargo-shear: false
-"#;
-        let config: CaptainConfig = parse_config(yaml);
-        assert!(!config.pre_push.clippy);
-        assert!(!config.pre_push.nextest);
-        assert!(!config.pre_push.doc_tests);
-        assert!(!config.pre_push.docs);
-        assert!(!config.pre_push.cargo_shear);
-    }
-
-    #[test]
-    fn feature_lists() {
-        let yaml = r#"
-pre-push:
-  clippy-features:
-    - serde
-    - async
-  doc-test-features:
-    - full
-  docs-features:
-    - all-features
-    - experimental
-"#;
-        let config: CaptainConfig = parse_config(yaml);
-
-        let clippy_features = config.pre_push.clippy_features.unwrap();
-        assert_eq!(clippy_features, vec!["serde", "async"]);
-
-        let doc_test_features = config.pre_push.doc_test_features.unwrap();
-        assert_eq!(doc_test_features, vec!["full"]);
-
-        let docs_features = config.pre_push.docs_features.unwrap();
-        assert_eq!(docs_features, vec!["all-features", "experimental"]);
-    }
-
-    #[test]
-    fn mixed_config() {
-        let yaml = r#"
-pre-commit:
-  generate-readmes: false
-  arborium: false
-pre-push:
-  nextest: false
-  clippy-features:
-    - serde
-"#;
-        let config: CaptainConfig = parse_config(yaml);
-
-        assert!(!config.pre_commit.generate_readmes);
-        assert!(config.pre_commit.rustfmt); // default
-        assert!(!config.pre_commit.arborium);
-
-        assert!(config.pre_push.clippy); // default
-        assert!(!config.pre_push.nextest);
-
-        let clippy_features = config.pre_push.clippy_features.unwrap();
-        assert_eq!(clippy_features, vec!["serde"]);
-    }
-
-    #[test]
-    fn only_pre_commit_block() {
-        let yaml = r#"
-pre-commit:
-  rustfmt: false
-"#;
-        let config: CaptainConfig = parse_config(yaml);
-        assert!(!config.pre_commit.rustfmt);
-        // pre-push defaults
-        assert!(config.pre_push.clippy);
-        assert!(config.pre_push.nextest);
-    }
-
-    #[test]
-    fn only_pre_push_block() {
-        let yaml = r#"
-pre-push:
-  clippy: false
-"#;
-        let config: CaptainConfig = parse_config(yaml);
-        // pre-commit defaults
-        assert!(config.pre_commit.generate_readmes);
-        assert!(config.pre_commit.rustfmt);
-        // pre-push override
-        assert!(!config.pre_push.clippy);
-    }
-
-    #[test]
-    fn comment_only_blocks_use_defaults() {
-        // This is what users get when they have a config with only comments under a key
-        // YAML parses `pre-commit:` with only comments as null
-        let yaml = r#"
-# Captain configuration
-# All options default to true unless noted. Set to false to disable.
-
-pre-commit:
-  # generate-readmes: false
-  # rustfmt: false
-  # cargo-lock: false
-  # arborium: false
-  # edition-2024: false
-
-pre-push:
-  # clippy: false
-  # nextest: false
-  # doc-tests: false
-  # docs: false
-  # cargo-shear: false
-"#;
-        let config: CaptainConfig = parse_config(yaml);
-        // All defaults should apply
-        assert!(config.pre_commit.generate_readmes);
-        assert!(config.pre_commit.rustfmt);
-        assert!(config.pre_commit.cargo_lock);
-        assert!(config.pre_commit.arborium);
-        assert!(config.pre_commit.edition_2024);
-        assert!(config.pre_push.clippy);
-        assert!(config.pre_push.nextest);
-        assert!(!config.pre_push.doc_tests);
-        assert!(config.pre_push.docs);
-        assert!(config.pre_push.cargo_shear);
-    }
-
-    #[test]
-    fn top_level_comments_only() {
-        // File with only comments should use all defaults
-        let yaml = r#"
-# Captain configuration
-# This file is intentionally empty - all defaults apply
-"#;
-        let config: CaptainConfig = parse_config(yaml);
-        assert!(config.pre_commit.generate_readmes);
-        assert!(config.pre_push.clippy);
-    }
-
-    #[test]
-    fn mixed_comments_and_values() {
-        let yaml = r#"
-pre-commit:
-  # Keep rustfmt enabled (default)
-  generate-readmes: false
-  # cargo-lock: false
-
-pre-push:
-  clippy: false
-  # nextest stays enabled
-  clippy-features:
-    - serde
-    # - disabled-feature
-    - tokio
-"#;
-        let config: CaptainConfig = parse_config(yaml);
-        assert!(!config.pre_commit.generate_readmes);
-        assert!(config.pre_commit.rustfmt); // default
-        assert!(config.pre_commit.cargo_lock); // default (commented out)
-        assert!(!config.pre_push.clippy);
-        assert!(config.pre_push.nextest); // default
-        let features = config.pre_push.clippy_features.unwrap();
-        assert_eq!(features, vec!["serde", "tokio"]);
-    }
 }

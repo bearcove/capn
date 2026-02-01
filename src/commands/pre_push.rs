@@ -1,8 +1,8 @@
 //! Pre-push hook implementation.
 
-use crate::config::load_captain_config;
 use crate::utils::{TaskProgress, dir_size, format_size, run_command_with_spinner};
 use crate::{command_with_color, maybe_strip_bytes};
+use captain_config::CaptainConfig;
 use log::{error, warn};
 use owo_colors::OwoColorize;
 use std::process::{Command, Stdio};
@@ -15,28 +15,10 @@ use std::{
 };
 use supports_color::Stream as ColorStream;
 
-// Move from main.rs:
-// - run_pre_push (lines 1163-1925)
-// - get_shared_target_dir (lines 1160-1162)
-// - debug_packages (lines 1081-1158) - or separate debug_packages.rs
-//
-// Helper functions used by pre_push:
-// - shell_escape (lines 944-952)
-// - format_command_line (lines 954-960)
-// - cargo_subcommand_missing_message (lines 962-973)
-// - indicates_missing_cargo_subcommand (lines 975-977)
-// - print_clippy_fix_hint (lines 979-997)
-// - print_shear_fix_hint (lines 999-1004)
-// - print_stream (lines 1006-1015)
-// - print_env_vars (lines 1017-1021)
-// - exit_with_command_failure (lines 1023-1040)
-// - exit_with_command_error (lines 1042-1056)
-// - should_skip_doc_tests (lines 1058-1066)
-
-pub fn run_pre_push() {
+pub fn run_pre_push(config: CaptainConfig) {
     use std::collections::{BTreeSet, HashSet};
 
-    let mut config = load_captain_config();
+    let mut config = config;
 
     // HAVE_MERCY levels:
     // 1 (or just set) = skip slow checks (tests, doc tests, docs)
