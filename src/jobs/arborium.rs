@@ -22,7 +22,7 @@ pub fn collect_arborium_jobs(metadata: &cargo_metadata::Metadata) -> Vec<Job> {
 
     // Filter to get publishable workspace crates (excluding demos and test crates)
     let arborium_header = br#"<!-- Rustdoc doesn't highlight some languages natively -- let's do it ourselves: https://github.com/bearcove/arborium -->
-    <script defer src="https://cdn.jsdelivr.net/npm/@arborium/arborium@2/dist/arborium.iife.js"></script>"#;
+<script defer src="https://cdn.jsdelivr.net/npm/@arborium/arborium@2/dist/arborium.iife.js"></script>"#;
 
     for package in &metadata.packages {
         // Only process workspace members

@@ -1,7 +1,8 @@
 //! Pre-commit hook implementation.
 
 use captain_config::CaptainConfig;
-use log::{debug, error};
+use cargo_metadata::Metadata;
+
 use owo_colors::OwoColorize;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -10,100 +11,50 @@ use std::sync::Arc;
 
 use crate::checks::{check_edition_2024, check_external_path_deps};
 use crate::jobs::Job;
-use crate::task::{TaskResult, TaskRunner};
+use crate::task::{TaskResult, TaskRunner, UnitResult};
 
 pub fn run_pre_commit(config: CaptainConfig, template_dir: Option<PathBuf>) {
-    let staged_files = match collect_staged_files() {
-        Ok(sf) => sf,
-        Err(e) => {
-            error!(
-                "Failed to collect staged files: {e}\n\
-                    This tool requires Git to be installed and a Git repository initialized."
-            );
-            std::process::exit(1);
-        }
-    };
-
     let start_time = std::time::Instant::now();
 
-    // Create task runner
     let mut runner = TaskRunner::new();
 
-    // Add metadata loading as a task that spawns other tasks
-    let config_clone = config.clone();
-    let staged_files = Arc::new(staged_files);
-    let template_dir = template_dir.map(Arc::new);
+    // Root tasks with no dependencies
+    let staged_id = runner.add("staged-files", collect_staged_files_task);
+    let metadata_id = runner.add("metadata", load_metadata_task);
 
-    runner.add("metadata", move |handle| {
-        let metadata = match cargo_metadata::MetadataCommand::new().exec() {
-            Ok(m) => Arc::new(m),
-            Err(e) => {
-                debug!("Failed to load workspace metadata: {}", e);
-                return TaskResult::failed("failed to load", e.to_string());
-            }
-        };
+    // Checks that depend on metadata
+    if config.pre_commit.edition_2024 {
+        runner.add_dep1("edition-2024", metadata_id, edition_2024_task);
+    }
 
-        // Spawn checks
-        if config_clone.pre_commit.edition_2024 {
-            let metadata = metadata.clone();
-            handle.spawn("edition-2024", move |_| {
-                match check_edition_2024(&metadata) {
-                    Ok(()) => TaskResult::success(),
-                    Err(e) => TaskResult::failed(e.summary, e.details),
-                }
-            });
-        }
+    if config.pre_commit.external_path_deps {
+        runner.add_dep1("external-deps", metadata_id, external_path_deps_task);
+    }
 
-        if config_clone.pre_commit.external_path_deps {
-            let metadata = metadata.clone();
-            handle.spawn("external-deps", move |_| {
-                match check_external_path_deps(&metadata) {
-                    Ok(()) => TaskResult::success(),
-                    Err(e) => TaskResult::failed(e.summary, e.details),
-                }
-            });
-        }
+    // Jobs that depend on staged files only
+    if config.pre_commit.rustfmt {
+        runner.add_dep1("rustfmt", staged_id, rustfmt_task);
+    }
 
-        // Spawn jobs
-        if config_clone.pre_commit.generate_readmes {
-            let metadata = metadata.clone();
-            let staged_files = staged_files.clone();
-            let template_dir = template_dir.clone();
-            handle.spawn("readmes", move |_handle| {
-                let jobs = crate::jobs::collect_readme_jobs(
-                    template_dir.as_deref().map(|p| p.as_path()),
-                    &staged_files,
-                    &metadata,
-                );
-                TaskResult::success_with_jobs(jobs)
-            });
-        }
+    // Jobs that depend on metadata only
+    if config.pre_commit.cargo_lock {
+        runner.add("cargo-lock", cargo_lock_task);
+    }
 
-        if config_clone.pre_commit.rustfmt {
-            let staged_files = staged_files.clone();
-            handle.spawn("rustfmt", move |_handle| {
-                let jobs = crate::jobs::collect_rustfmt_jobs(&staged_files);
-                TaskResult::success_with_jobs(jobs)
-            });
-        }
+    if config.pre_commit.arborium {
+        runner.add_dep1("arborium", metadata_id, arborium_task);
+    }
 
-        if config_clone.pre_commit.cargo_lock {
-            handle.spawn("cargo-lock", move |_handle| {
-                let jobs = crate::jobs::collect_cargo_lock_jobs();
-                TaskResult::success_with_jobs(jobs)
-            });
-        }
-
-        if config_clone.pre_commit.arborium {
-            let metadata = metadata.clone();
-            handle.spawn("arborium", move |_handle| {
-                let jobs = crate::jobs::collect_arborium_jobs(&metadata);
-                TaskResult::success_with_jobs(jobs)
-            });
-        }
-
-        TaskResult::success()
-    });
+    // Jobs that depend on both metadata and staged files
+    if config.pre_commit.generate_readmes {
+        let template_dir = template_dir.map(Arc::new);
+        runner.add_dep2(
+            "readmes",
+            metadata_id,
+            staged_id,
+            move |metadata, staged| readmes_task(metadata, staged, template_dir.clone()),
+        );
+    }
 
     // Run all tasks
     let results = runner.run();
@@ -128,6 +79,76 @@ pub fn run_pre_commit(config: CaptainConfig, template_dir: Option<PathBuf>) {
 
     show_and_apply_jobs(&mut jobs);
 }
+
+// ============================================================================
+// Task functions
+// ============================================================================
+
+fn collect_staged_files_task() -> TaskResult<StagedFiles> {
+    match collect_staged_files() {
+        Ok(sf) => TaskResult::success(sf),
+        Err(e) => TaskResult::failed(
+            "failed to collect",
+            format!(
+                "Failed to collect staged files: {e}\n\
+                This tool requires Git to be installed and a Git repository initialized."
+            ),
+        ),
+    }
+}
+
+fn load_metadata_task() -> TaskResult<Metadata> {
+    match cargo_metadata::MetadataCommand::new().exec() {
+        Ok(m) => TaskResult::success(m),
+        Err(e) => TaskResult::failed("failed to load", e.to_string()),
+    }
+}
+
+fn edition_2024_task(metadata: Arc<Metadata>) -> UnitResult {
+    match check_edition_2024(&metadata) {
+        Ok(()) => TaskResult::success(()),
+        Err(e) => TaskResult::failed(e.summary, e.details),
+    }
+}
+
+fn external_path_deps_task(metadata: Arc<Metadata>) -> UnitResult {
+    match check_external_path_deps(&metadata) {
+        Ok(()) => TaskResult::success(()),
+        Err(e) => TaskResult::failed(e.summary, e.details),
+    }
+}
+
+fn rustfmt_task(staged: Arc<StagedFiles>) -> UnitResult {
+    let jobs = crate::jobs::collect_rustfmt_jobs(&staged);
+    TaskResult::success_with_jobs((), jobs)
+}
+
+fn cargo_lock_task() -> UnitResult {
+    let jobs = crate::jobs::collect_cargo_lock_jobs();
+    TaskResult::success_with_jobs((), jobs)
+}
+
+fn arborium_task(metadata: Arc<Metadata>) -> UnitResult {
+    let jobs = crate::jobs::collect_arborium_jobs(&metadata);
+    TaskResult::success_with_jobs((), jobs)
+}
+
+fn readmes_task(
+    metadata: Arc<Metadata>,
+    staged: Arc<StagedFiles>,
+    template_dir: Option<Arc<PathBuf>>,
+) -> UnitResult {
+    let jobs = crate::jobs::collect_readme_jobs(
+        template_dir.as_deref().map(|p| p.as_path()),
+        &staged,
+        &metadata,
+    );
+    TaskResult::success_with_jobs((), jobs)
+}
+
+// ============================================================================
+// Helper types and functions
+// ============================================================================
 
 #[derive(Debug, Clone)]
 pub struct StagedFiles {
