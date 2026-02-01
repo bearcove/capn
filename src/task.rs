@@ -129,7 +129,7 @@ pub type UnitResult = TaskResult<()>;
 /// Type-erased task result for internal storage
 enum InternalResult {
     Success {
-        /// The output value, boxed as CloneAny (actually Arc<T>)
+        /// The output value, boxed as CloneAny (actually `Arc<T>`)
         value: Box<dyn CloneAny>,
         jobs: Vec<Job>,
     },
@@ -466,6 +466,8 @@ impl TaskRunner {
         let mut waiting: Vec<PendingTask> = self.pending;
         // Collected results
         let mut results = Vec::new();
+        // Track if we've seen a failure (stop spawning new tasks)
+        let mut has_failure = false;
 
         // Helper to check if all deps are satisfied
         let deps_ready = |deps: &[u64], outputs: &HashMap<u64, Box<dyn CloneAny>>| {
@@ -484,7 +486,7 @@ impl TaskRunner {
         }
 
         // Event loop
-        while !running.is_empty() || !waiting.is_empty() {
+        while !running.is_empty() {
             let event = match event_rx.recv() {
                 Ok(e) => e,
                 Err(_) => break,
@@ -503,6 +505,11 @@ impl TaskRunner {
                         finalize_spinner(info.spinner, &info.name, &result, elapsed);
                     }
 
+                    // Check if this is a failure
+                    if matches!(result, InternalResult::Failed { .. }) {
+                        has_failure = true;
+                    }
+
                     // Store output if successful
                     if let InternalResult::Success { ref value, .. } = result {
                         outputs.insert(id, value.clone_box());
@@ -510,24 +517,38 @@ impl TaskRunner {
 
                     results.push((name, result));
 
-                    // Check if any waiting tasks can now run
-                    let mut i = 0;
-                    while i < waiting.len() {
-                        if deps_ready(&waiting[i].deps, &outputs) {
-                            let pending = waiting.remove(i);
-                            spawn_pending(
-                                pending,
-                                &self.progress,
-                                &event_tx,
-                                &mut running,
-                                &outputs,
-                            );
-                        } else {
-                            i += 1;
+                    // Only spawn new tasks if we haven't seen a failure
+                    if !has_failure {
+                        let mut i = 0;
+                        while i < waiting.len() {
+                            if deps_ready(&waiting[i].deps, &outputs) {
+                                let pending = waiting.remove(i);
+                                spawn_pending(
+                                    pending,
+                                    &self.progress,
+                                    &event_tx,
+                                    &mut running,
+                                    &outputs,
+                                );
+                            } else {
+                                i += 1;
+                            }
                         }
                     }
                 }
             }
+        }
+
+        // Mark any remaining waiting tasks as cancelled (with visible spinner)
+        for pending in waiting {
+            let spinner = self.progress.add_task(&pending.name);
+            spinner.skip("cancelled");
+            results.push((
+                pending.name,
+                InternalResult::Skipped {
+                    reason: "cancelled".to_string(),
+                },
+            ));
         }
 
         TaskResults { results }
