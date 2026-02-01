@@ -143,12 +143,134 @@ enum InternalResult {
 }
 
 /// Type-erased task function
-type BoxedTask = Box<dyn FnOnce() -> InternalResult + Send>;
+type BoxedTask = Box<dyn FnOnce(&TaskHandle) -> InternalResult + Send>;
 
 /// Internal event sent to the runner
 enum Event {
+    /// Update spinner message
+    SetMessage(u64, String),
     /// Task completed
     Complete(u64, String, InternalResult),
+}
+
+/// Handle for a task to update its spinner message.
+#[derive(Clone)]
+pub struct TaskHandle {
+    id: u64,
+    event_tx: mpsc::Sender<Event>,
+}
+
+impl TaskHandle {
+    /// Update the spinner message (e.g., "compiling foo...")
+    pub fn set_message(&self, msg: impl Into<String>) {
+        let _ = self.event_tx.send(Event::SetMessage(self.id, msg.into()));
+    }
+
+    /// Run a command and update the spinner with the last line of output.
+    /// Returns the command output when complete.
+    pub fn run_command(&self, command: &[&str]) -> std::io::Result<std::process::Output> {
+        self.run_command_with_env(command, &[])
+    }
+
+    /// Run a command with environment variables and update the spinner with output.
+    pub fn run_command_with_env(
+        &self,
+        command: &[&str],
+        envs: &[(&str, &str)],
+    ) -> std::io::Result<std::process::Output> {
+        use std::io::BufRead;
+        use std::process::{Command, Stdio};
+        use std::time::Duration;
+
+        let mut cmd = Command::new(command[0]);
+        for arg in &command[1..] {
+            cmd.arg(arg);
+        }
+        for (key, value) in envs {
+            cmd.env(key, value);
+        }
+        // Force color output
+        cmd.env("FORCE_COLOR", "1");
+        cmd.env("CARGO_TERM_COLOR", "always");
+
+        cmd.stdout(Stdio::piped());
+        cmd.stderr(Stdio::piped());
+
+        let mut child = cmd.spawn()?;
+
+        let stdout = child.stdout.take().expect("Failed to capture stdout");
+        let stderr = child.stderr.take().expect("Failed to capture stderr");
+
+        // Channels to collect output
+        let (stdout_tx, stdout_rx) = mpsc::channel::<String>();
+        let (stderr_tx, stderr_rx) = mpsc::channel::<String>();
+
+        // Spawn threads to read stdout and stderr
+        let stdout_thread = thread::spawn(move || {
+            let reader = std::io::BufReader::new(stdout);
+            for line in reader.lines().map_while(Result::ok) {
+                let _ = stdout_tx.send(line);
+            }
+        });
+
+        let stderr_thread = thread::spawn(move || {
+            let reader = std::io::BufReader::new(stderr);
+            for line in reader.lines().map_while(Result::ok) {
+                let _ = stderr_tx.send(line);
+            }
+        });
+
+        let mut stdout_buffer = Vec::new();
+        let mut stderr_buffer = Vec::new();
+
+        loop {
+            match child.try_wait()? {
+                Some(status) => {
+                    // Process finished, collect remaining output
+                    while let Ok(line) = stdout_rx.try_recv() {
+                        stdout_buffer.push(line);
+                    }
+                    while let Ok(line) = stderr_rx.try_recv() {
+                        stderr_buffer.push(line);
+                    }
+
+                    let _ = stdout_thread.join();
+                    let _ = stderr_thread.join();
+
+                    let stdout_bytes = stdout_buffer.join("\n").into_bytes();
+                    let stderr_bytes = stderr_buffer.join("\n").into_bytes();
+
+                    return Ok(std::process::Output {
+                        status,
+                        stdout: stdout_bytes,
+                        stderr: stderr_bytes,
+                    });
+                }
+                None => {
+                    // Process still running, update spinner with latest output
+                    let mut last_line = None;
+
+                    while let Ok(line) = stdout_rx.try_recv() {
+                        last_line = Some(line.clone());
+                        stdout_buffer.push(line);
+                    }
+                    while let Ok(line) = stderr_rx.try_recv() {
+                        // Prefer stderr for status (cargo writes there)
+                        last_line = Some(line.clone());
+                        stderr_buffer.push(line);
+                    }
+
+                    if let Some(line) = last_line {
+                        // Strip ANSI codes for display
+                        let clean = strip_ansi_escapes::strip_str(&line);
+                        self.set_message(clean);
+                    }
+
+                    thread::sleep(Duration::from_millis(50));
+                }
+            }
+        }
+    }
 }
 
 /// Pending task waiting for dependencies
@@ -157,6 +279,7 @@ struct PendingTask {
     name: String,
     deps: Vec<u64>,
     /// Creates the BoxedTask once dependencies are resolved
+    #[allow(clippy::type_complexity)]
     make_task: Box<dyn FnOnce(&HashMap<u64, Box<dyn CloneAny>>) -> BoxedTask + Send>,
 }
 
@@ -204,6 +327,18 @@ impl TaskResults {
         }
         jobs
     }
+
+    /// Get a typed value from a successful task by name.
+    pub fn get<T: Clone + Send + Sync + 'static>(&self, name: &str) -> Option<Arc<T>> {
+        for (task_name, result) in &self.results {
+            if task_name == name
+                && let InternalResult::Success { value, .. } = result
+            {
+                return value.as_any().downcast_ref::<Arc<T>>().cloned();
+            }
+        }
+        None
+    }
 }
 
 /// Runs tasks in parallel with progress spinners and dependency resolution.
@@ -224,7 +359,7 @@ impl TaskRunner {
     pub fn add<T, F>(&mut self, name: impl Into<String>, task: F) -> TaskId<T>
     where
         T: Send + Sync + 'static,
-        F: FnOnce() -> TaskResult<T> + Send + 'static,
+        F: FnOnce(&TaskHandle) -> TaskResult<T> + Send + 'static,
     {
         let id = TaskId::<T>::new();
         let name = name.into();
@@ -233,7 +368,7 @@ impl TaskRunner {
             id: id.raw(),
             name,
             deps: vec![],
-            make_task: Box::new(move |_outputs| Box::new(move || run_task(task))),
+            make_task: Box::new(move |_outputs| Box::new(move |handle| run_task(handle, task))),
         });
 
         id
@@ -249,7 +384,7 @@ impl TaskRunner {
     where
         T: Send + Sync + 'static,
         D1: Send + Sync + 'static,
-        F: FnOnce(Arc<D1>) -> TaskResult<T> + Send + 'static,
+        F: FnOnce(&TaskHandle, Arc<D1>) -> TaskResult<T> + Send + 'static,
     {
         let id = TaskId::<T>::new();
         let name = name.into();
@@ -267,7 +402,7 @@ impl TaskRunner {
                     .downcast_ref::<Arc<D1>>()
                     .expect("dependency type mismatch")
                     .clone();
-                Box::new(move || run_task(move || task(d1)))
+                Box::new(move |handle| run_task(handle, move |h| task(h, d1)))
             }),
         });
 
@@ -286,7 +421,7 @@ impl TaskRunner {
         T: Send + Sync + 'static,
         D1: Send + Sync + 'static,
         D2: Send + Sync + 'static,
-        F: FnOnce(Arc<D1>, Arc<D2>) -> TaskResult<T> + Send + 'static,
+        F: FnOnce(&TaskHandle, Arc<D1>, Arc<D2>) -> TaskResult<T> + Send + 'static,
     {
         let id = TaskId::<T>::new();
         let name = name.into();
@@ -312,7 +447,7 @@ impl TaskRunner {
                     .downcast_ref::<Arc<D2>>()
                     .expect("dependency type mismatch")
                     .clone();
-                Box::new(move || run_task(move || task(d1, d2)))
+                Box::new(move |handle| run_task(handle, move |h| task(h, d1, d2)))
             }),
         });
 
@@ -356,6 +491,11 @@ impl TaskRunner {
             };
 
             match event {
+                Event::SetMessage(id, msg) => {
+                    if let Some(info) = running.get(&id) {
+                        info.spinner.set_message(&msg);
+                    }
+                }
                 Event::Complete(id, name, result) => {
                     // Finalize spinner
                     if let Some(info) = running.remove(&id) {
@@ -395,8 +535,11 @@ impl TaskRunner {
 }
 
 /// Run a typed task and convert to internal result
-fn run_task<T: Send + Sync + 'static>(task: impl FnOnce() -> TaskResult<T>) -> InternalResult {
-    match task() {
+fn run_task<T: Send + Sync + 'static>(
+    handle: &TaskHandle,
+    task: impl FnOnce(&TaskHandle) -> TaskResult<T>,
+) -> InternalResult {
+    match task(handle) {
         TaskResult::Success(output) => InternalResult::Success {
             value: Box::new(Arc::new(output.value)),
             jobs: output.jobs,
@@ -431,7 +574,11 @@ fn spawn_pending(
     let tx = event_tx.clone();
 
     thread::spawn(move || {
-        let result = task();
+        let handle = TaskHandle {
+            id,
+            event_tx: tx.clone(),
+        };
+        let result = task(&handle);
         let _ = tx.send(Event::Complete(id, name, result));
     });
 }

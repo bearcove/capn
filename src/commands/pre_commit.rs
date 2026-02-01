@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use crate::checks::{check_edition_2024, check_external_path_deps};
 use crate::jobs::Job;
-use crate::task::{TaskResult, TaskRunner, UnitResult};
+use crate::task::{TaskHandle, TaskResult, TaskRunner, UnitResult};
 
 pub fn run_pre_commit(config: CaptainConfig, template_dir: Option<PathBuf>) {
     let start_time = std::time::Instant::now();
@@ -52,7 +52,9 @@ pub fn run_pre_commit(config: CaptainConfig, template_dir: Option<PathBuf>) {
             "readmes",
             metadata_id,
             staged_id,
-            move |metadata, staged| readmes_task(metadata, staged, template_dir.clone()),
+            move |handle, metadata, staged| {
+                readmes_task(handle, metadata, staged, template_dir.clone())
+            },
         );
     }
 
@@ -84,7 +86,7 @@ pub fn run_pre_commit(config: CaptainConfig, template_dir: Option<PathBuf>) {
 // Task functions
 // ============================================================================
 
-fn collect_staged_files_task() -> TaskResult<StagedFiles> {
+fn collect_staged_files_task(_handle: &TaskHandle) -> TaskResult<StagedFiles> {
     match collect_staged_files() {
         Ok(sf) => TaskResult::success(sf),
         Err(e) => TaskResult::failed(
@@ -97,43 +99,44 @@ fn collect_staged_files_task() -> TaskResult<StagedFiles> {
     }
 }
 
-fn load_metadata_task() -> TaskResult<Metadata> {
+fn load_metadata_task(_handle: &TaskHandle) -> TaskResult<Metadata> {
     match cargo_metadata::MetadataCommand::new().exec() {
         Ok(m) => TaskResult::success(m),
         Err(e) => TaskResult::failed("failed to load", e.to_string()),
     }
 }
 
-fn edition_2024_task(metadata: Arc<Metadata>) -> UnitResult {
+fn edition_2024_task(_handle: &TaskHandle, metadata: Arc<Metadata>) -> UnitResult {
     match check_edition_2024(&metadata) {
         Ok(()) => TaskResult::success(()),
         Err(e) => TaskResult::failed(e.summary, e.details),
     }
 }
 
-fn external_path_deps_task(metadata: Arc<Metadata>) -> UnitResult {
+fn external_path_deps_task(_handle: &TaskHandle, metadata: Arc<Metadata>) -> UnitResult {
     match check_external_path_deps(&metadata) {
         Ok(()) => TaskResult::success(()),
         Err(e) => TaskResult::failed(e.summary, e.details),
     }
 }
 
-fn rustfmt_task(staged: Arc<StagedFiles>) -> UnitResult {
+fn rustfmt_task(_handle: &TaskHandle, staged: Arc<StagedFiles>) -> UnitResult {
     let jobs = crate::jobs::collect_rustfmt_jobs(&staged);
     TaskResult::success_with_jobs((), jobs)
 }
 
-fn cargo_lock_task() -> UnitResult {
+fn cargo_lock_task(_handle: &TaskHandle) -> UnitResult {
     let jobs = crate::jobs::collect_cargo_lock_jobs();
     TaskResult::success_with_jobs((), jobs)
 }
 
-fn arborium_task(metadata: Arc<Metadata>) -> UnitResult {
+fn arborium_task(_handle: &TaskHandle, metadata: Arc<Metadata>) -> UnitResult {
     let jobs = crate::jobs::collect_arborium_jobs(&metadata);
     TaskResult::success_with_jobs((), jobs)
 }
 
 fn readmes_task(
+    _handle: &TaskHandle,
     metadata: Arc<Metadata>,
     staged: Arc<StagedFiles>,
     template_dir: Option<Arc<PathBuf>>,

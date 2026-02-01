@@ -1,14 +1,15 @@
 //! Pre-push hook implementation.
 
-use crate::task::{TaskResult, TaskRunner, UnitResult};
-use crate::{command_with_color, maybe_strip_bytes};
+use crate::maybe_strip_bytes;
+use crate::task::{TaskHandle, TaskResult, TaskRunner, UnitResult};
+use crate::utils::{dir_size, format_size};
 use captain_config::CaptainConfig;
 use cargo_metadata::Metadata;
 use owo_colors::OwoColorize;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::sync::Arc;
 use supports_color::Stream as ColorStream;
 
@@ -106,10 +107,13 @@ pub fn run_pre_push(config: CaptainConfig) {
         compute_affected_crates_task,
     );
 
+    // Background task: measure target directory size
+    runner.add("target size", target_size_task);
+
     // Workspace-wide checks (no deps on affected crates)
     if config.pre_push.clippy {
         let features = config.pre_push.clippy_features.clone();
-        runner.add("clippy", move || clippy_task(features));
+        runner.add("clippy", move |handle| clippy_task(handle, features));
     }
 
     if config.pre_push.cargo_shear {
@@ -124,15 +128,15 @@ pub fn run_pre_push(config: CaptainConfig) {
 
     if config.pre_push.doc_tests {
         let features = config.pre_push.doc_test_features.clone();
-        runner.add_dep1("doc tests", affected_id, move |affected| {
-            doc_tests_task(affected, features)
+        runner.add_dep1("doc tests", affected_id, move |handle, affected| {
+            doc_tests_task(handle, affected, features)
         });
     }
 
     if config.pre_push.docs {
         let features = config.pre_push.docs_features.clone();
-        runner.add_dep1("docs", affected_id, move |affected| {
-            docs_task(affected, features)
+        runner.add_dep1("docs", affected_id, move |handle, affected| {
+            docs_task(handle, affected, features)
         });
     }
 
@@ -146,6 +150,15 @@ pub fn run_pre_push(config: CaptainConfig) {
     }
 
     println!();
+
+    // Print target directory size if available
+    if let Some(size) = results.get::<u64>("target size") {
+        println!(
+            "{}",
+            format!("📦 Target directory: {}", format_size(*size)).dimmed()
+        );
+    }
+
     println!("{} {}", "✅".green(), "All checks passed!".green().bold());
 
     std::process::exit(0);
@@ -155,7 +168,17 @@ pub fn run_pre_push(config: CaptainConfig) {
 // Task functions
 // ============================================================================
 
-fn load_metadata_task() -> TaskResult<Metadata> {
+fn target_size_task(_handle: &TaskHandle) -> TaskResult<u64> {
+    // Use the shared target directory if set, otherwise default
+    let target_dir = std::env::var("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("target"));
+
+    let size = dir_size(&target_dir);
+    TaskResult::success(size)
+}
+
+fn load_metadata_task(_handle: &TaskHandle) -> TaskResult<Metadata> {
     match cargo_metadata::MetadataCommand::new().exec() {
         Ok(m) => {
             // If this is a virtual workspace with no members, skip checks
@@ -191,7 +214,7 @@ fn load_metadata_task() -> TaskResult<Metadata> {
     }
 }
 
-fn git_fetch_and_diff_task() -> TaskResult<GitInfo> {
+fn git_fetch_and_diff_task(_handle: &TaskHandle) -> TaskResult<GitInfo> {
     // Fetch from origin
     let fetch_output = Command::new("git")
         .args(["fetch", "origin", "main"])
@@ -234,7 +257,7 @@ fn git_fetch_and_diff_task() -> TaskResult<GitInfo> {
         .unwrap_or(0);
 
     // Get changed files
-    let diff_output = command_with_color("git")
+    let diff_output = Command::new("git")
         .args(["diff", "--name-only", "origin/main", "HEAD"])
         .output();
 
@@ -264,6 +287,7 @@ fn git_fetch_and_diff_task() -> TaskResult<GitInfo> {
 }
 
 fn compute_affected_crates_task(
+    _handle: &TaskHandle,
     metadata: Arc<Metadata>,
     git: Arc<GitInfo>,
 ) -> TaskResult<AffectedCrates> {
@@ -341,8 +365,8 @@ fn compute_affected_crates_task(
     })
 }
 
-fn clippy_task(features: Option<Vec<String>>) -> UnitResult {
-    let mut args = vec!["clippy", "--workspace", "--all-targets"];
+fn clippy_task(handle: &TaskHandle, features: Option<Vec<String>>) -> UnitResult {
+    let mut args = vec!["cargo", "clippy", "--workspace", "--all-targets"];
 
     let features_str: String;
     match &features {
@@ -359,68 +383,52 @@ fn clippy_task(features: Option<Vec<String>>) -> UnitResult {
 
     args.extend(["--", "-D", "warnings"]);
 
-    let output = command_with_color("cargo")
-        .args(&args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output();
-
-    match output {
+    match handle.run_command(&args) {
         Ok(o) if o.status.success() => TaskResult::success(()),
         Ok(o) => {
-            let details = format_command_failure(&["cargo".to_string()], &args, &o);
+            let details = format_command_failure_ref(&args, &o);
             TaskResult::failed("clippy errors", details)
         }
         Err(e) => TaskResult::failed("failed to run", e.to_string()),
     }
 }
 
-fn cargo_shear_task() -> UnitResult {
-    let output = command_with_color("cargo")
-        .args(["shear"])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output();
+fn cargo_shear_task(handle: &TaskHandle) -> UnitResult {
+    let args = ["cargo", "shear"];
 
-    match output {
+    match handle.run_command(&args) {
         Ok(o) if o.status.success() => TaskResult::success(()),
         Ok(o) if indicates_missing_cargo_subcommand(&o, "shear") => {
             TaskResult::skipped("not installed")
         }
         Ok(o) => {
-            let details = format_command_failure(&["cargo".to_string()], &["shear"], &o);
+            let details = format_command_failure_ref(&args, &o);
             TaskResult::failed("unused deps", details)
         }
         Err(e) => TaskResult::failed("failed to run", e.to_string()),
     }
 }
 
-fn build_tests_task(affected: Arc<AffectedCrates>) -> UnitResult {
-    let mut args = vec!["nextest", "run", "--no-run"];
+fn build_tests_task(handle: &TaskHandle, affected: Arc<AffectedCrates>) -> UnitResult {
+    let mut args = vec!["cargo", "nextest", "run", "--no-run"];
 
     for crate_name in &affected.crates {
         args.push("-p");
         args.push(crate_name);
     }
 
-    let output = command_with_color("cargo")
-        .args(&args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output();
-
-    match output {
+    match handle.run_command(&args) {
         Ok(o) if o.status.success() => TaskResult::success(()),
         Ok(o) => {
-            let details = format_command_failure(&["cargo".to_string()], &args, &o);
+            let details = format_command_failure_ref(&args, &o);
             TaskResult::failed("build failed", details)
         }
         Err(e) => TaskResult::failed("failed to run", e.to_string()),
     }
 }
 
-fn run_tests_task(affected: Arc<AffectedCrates>) -> UnitResult {
-    let mut args = vec!["nextest", "run"];
+fn run_tests_task(handle: &TaskHandle, affected: Arc<AffectedCrates>) -> UnitResult {
+    let mut args = vec!["cargo", "nextest", "run"];
 
     for crate_name in &affected.crates {
         args.push("-p");
@@ -428,24 +436,22 @@ fn run_tests_task(affected: Arc<AffectedCrates>) -> UnitResult {
     }
     args.push("--no-tests=pass");
 
-    let output = command_with_color("cargo")
-        .args(&args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output();
-
-    match output {
+    match handle.run_command(&args) {
         Ok(o) if o.status.success() => TaskResult::success(()),
         Ok(o) => {
-            let details = format_command_failure(&["cargo".to_string()], &args, &o);
+            let details = format_command_failure_ref(&args, &o);
             TaskResult::failed("tests failed", details)
         }
         Err(e) => TaskResult::failed("failed to run", e.to_string()),
     }
 }
 
-fn doc_tests_task(affected: Arc<AffectedCrates>, features: Option<Vec<String>>) -> UnitResult {
-    let mut args = vec!["test", "--doc"];
+fn doc_tests_task(
+    handle: &TaskHandle,
+    affected: Arc<AffectedCrates>,
+    features: Option<Vec<String>>,
+) -> UnitResult {
+    let mut args = vec!["cargo", "test", "--doc"];
 
     for crate_name in &affected.crates {
         args.push("-p");
@@ -465,25 +471,23 @@ fn doc_tests_task(affected: Arc<AffectedCrates>, features: Option<Vec<String>>) 
         Some(_) => {}
     }
 
-    let output = command_with_color("cargo")
-        .args(&args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output();
-
-    match output {
+    match handle.run_command(&args) {
         Ok(o) if o.status.success() => TaskResult::success(()),
         Ok(o) if should_skip_doc_tests(&o) => TaskResult::skipped("no lib to test"),
         Ok(o) => {
-            let details = format_command_failure(&["cargo".to_string()], &args, &o);
+            let details = format_command_failure_ref(&args, &o);
             TaskResult::failed("doc tests failed", details)
         }
         Err(e) => TaskResult::failed("failed to run", e.to_string()),
     }
 }
 
-fn docs_task(affected: Arc<AffectedCrates>, features: Option<Vec<String>>) -> UnitResult {
-    let mut args = vec!["doc", "--no-deps"];
+fn docs_task(
+    handle: &TaskHandle,
+    affected: Arc<AffectedCrates>,
+    features: Option<Vec<String>>,
+) -> UnitResult {
+    let mut args = vec!["cargo", "doc", "--no-deps"];
 
     for crate_name in &affected.crates {
         args.push("-p");
@@ -503,17 +507,10 @@ fn docs_task(affected: Arc<AffectedCrates>, features: Option<Vec<String>>) -> Un
         Some(_) => {}
     }
 
-    let output = command_with_color("cargo")
-        .args(&args)
-        .env("RUSTDOCFLAGS", "-D warnings")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output();
-
-    match output {
+    match handle.run_command_with_env(&args, &[("RUSTDOCFLAGS", "-D warnings")]) {
         Ok(o) if o.status.success() => TaskResult::success(()),
         Ok(o) => {
-            let details = format_command_failure(&["cargo".to_string()], &args, &o);
+            let details = format_command_failure_ref(&args, &o);
             TaskResult::failed("doc warnings", details)
         }
         Err(e) => TaskResult::failed("failed to run", e.to_string()),
@@ -533,15 +530,10 @@ fn setup_shared_target_dir() {
     }
 }
 
-fn format_command_failure(cmd: &[String], args: &[&str], output: &std::process::Output) -> String {
+fn format_command_failure_ref(args: &[&str], output: &std::process::Output) -> String {
     let mut details = String::new();
 
-    let full_cmd: Vec<String> = cmd
-        .iter()
-        .cloned()
-        .chain(args.iter().map(|s| s.to_string()))
-        .collect();
-    details.push_str(&format!("command: {}\n", full_cmd.join(" ")));
+    details.push_str(&format!("command: {}\n", args.join(" ")));
 
     match output.status.code() {
         Some(code) => details.push_str(&format!("exit code: {}\n", code)),

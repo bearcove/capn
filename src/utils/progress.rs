@@ -35,12 +35,6 @@ impl TaskSpinner {
         ));
     }
 
-    /// Mark task as successful with a custom message
-    pub fn succeed_with_message(&self, message: String) {
-        self.bar.set_style(finished_style());
-        self.bar.finish_with_message(message);
-    }
-
     /// Mark task as failed with elapsed time
     pub fn fail(&self, elapsed_secs: f32) {
         self.bar.set_style(finished_style());
@@ -75,12 +69,6 @@ impl TaskSpinner {
         self.bar
             .set_message(format!("{:<14} {}", self.name, display_msg.dimmed()));
     }
-
-    /// Clear the spinner without showing anything (for skipped tasks)
-    pub fn clear(&self) {
-        self.bar.set_style(finished_style());
-        self.bar.finish_and_clear();
-    }
 }
 
 /// Manages multiple concurrent task spinners
@@ -112,105 +100,5 @@ impl TaskProgress {
 impl Default for TaskProgress {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-use std::io::{BufRead, BufReader};
-use std::process::{Command, Output, Stdio};
-use std::sync::mpsc;
-
-/// Run a command and update the spinner with the last line of output
-pub fn run_command_with_spinner(
-    command: &[String],
-    envs: &[(&str, &str)],
-    spinner: &TaskSpinner,
-) -> Result<Output, std::io::Error> {
-    let mut cmd = Command::new(&command[0]);
-    for arg in &command[1..] {
-        cmd.arg(arg);
-    }
-    for (key, value) in envs {
-        cmd.env(key, value);
-    }
-    // Force color output
-    cmd.env("FORCE_COLOR", "1");
-    cmd.env("CARGO_TERM_COLOR", "always");
-
-    cmd.stdout(Stdio::piped());
-    cmd.stderr(Stdio::piped());
-
-    let mut child = cmd.spawn()?;
-
-    let stdout = child.stdout.take().expect("Failed to capture stdout");
-    let stderr = child.stderr.take().expect("Failed to capture stderr");
-
-    // Channels to collect output
-    let (stdout_tx, stdout_rx) = mpsc::channel::<String>();
-    let (stderr_tx, stderr_rx) = mpsc::channel::<String>();
-
-    // Spawn threads to read stdout and stderr
-    let stdout_thread = std::thread::spawn(move || {
-        let reader = BufReader::new(stdout);
-        for line in reader.lines().map_while(Result::ok) {
-            let _ = stdout_tx.send(line);
-        }
-    });
-
-    let stderr_thread = std::thread::spawn(move || {
-        let reader = BufReader::new(stderr);
-        for line in reader.lines().map_while(Result::ok) {
-            let _ = stderr_tx.send(line);
-        }
-    });
-
-    let mut stdout_buffer = Vec::new();
-    let mut stderr_buffer = Vec::new();
-
-    loop {
-        match child.try_wait()? {
-            Some(status) => {
-                // Process finished, collect remaining output
-                while let Ok(line) = stdout_rx.try_recv() {
-                    stdout_buffer.push(line);
-                }
-                while let Ok(line) = stderr_rx.try_recv() {
-                    stderr_buffer.push(line);
-                }
-
-                let _ = stdout_thread.join();
-                let _ = stderr_thread.join();
-
-                let stdout_bytes = stdout_buffer.join("\n").into_bytes();
-                let stderr_bytes = stderr_buffer.join("\n").into_bytes();
-
-                return Ok(Output {
-                    status,
-                    stdout: stdout_bytes,
-                    stderr: stderr_bytes,
-                });
-            }
-            None => {
-                // Process still running, update spinner with latest output
-                let mut last_line = None;
-
-                while let Ok(line) = stdout_rx.try_recv() {
-                    last_line = Some(line.clone());
-                    stdout_buffer.push(line);
-                }
-                while let Ok(line) = stderr_rx.try_recv() {
-                    // Prefer stderr for status (cargo writes there)
-                    last_line = Some(line.clone());
-                    stderr_buffer.push(line);
-                }
-
-                if let Some(line) = last_line {
-                    // Strip ANSI codes for display
-                    let clean = strip_ansi_escapes::strip_str(&line);
-                    spinner.set_message(&clean);
-                }
-
-                std::thread::sleep(Duration::from_millis(50));
-            }
-        }
     }
 }
