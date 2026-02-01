@@ -1,29 +1,43 @@
 //! Pre-push hook implementation.
 
-use crate::utils::{TaskProgress, dir_size, format_size, run_command_with_spinner};
+use crate::task::{TaskResult, TaskRunner, UnitResult};
 use crate::{command_with_color, maybe_strip_bytes};
 use captain_config::CaptainConfig;
-use log::{error, warn};
+use cargo_metadata::Metadata;
 use owo_colors::OwoColorize;
+use std::collections::{BTreeSet, HashMap, HashSet};
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::mpsc;
-use std::time::Duration;
-use std::{
-    fs, io,
-    io::Write,
-    path::{Path, PathBuf},
-};
+use std::sync::Arc;
 use supports_color::Stream as ColorStream;
 
-pub fn run_pre_push(config: CaptainConfig) {
-    use std::collections::{BTreeSet, HashSet};
+/// Data collected from git fetch + diff operations
+#[derive(Clone)]
+#[allow(dead_code)]
+pub struct GitInfo {
+    pub origin_main_sha: String,
+    pub head_sha: String,
+    pub commit_count: u32,
+    pub changed_files: Vec<String>,
+    pub fetch_failed: bool,
+}
 
+/// Data about affected crates
+#[derive(Clone)]
+#[allow(dead_code)]
+pub struct AffectedCrates {
+    pub crates: BTreeSet<String>,
+    pub crate_to_files: HashMap<String, Vec<String>>,
+}
+
+pub fn run_pre_push(config: CaptainConfig) {
     let mut config = config;
 
     // HAVE_MERCY levels:
     // 1 (or just set) = skip slow checks (tests, doc tests, docs)
     // 2 = also skip clippy (just cargo-shear)
-    // 3 = skip everything, just check formatting basically
+    // 3 = skip everything
     if let Ok(mercy) = std::env::var("HAVE_MERCY") {
         let level: u8 = mercy.parse().unwrap_or(1);
         let mut skipped = Vec::new();
@@ -76,224 +90,120 @@ pub fn run_pre_push(config: CaptainConfig) {
     }
 
     // Set up shared target directory
-    let shared_target_dir = get_shared_target_dir();
+    setup_shared_target_dir();
 
-    // Use a channel so we can do non-blocking receive for dir_size
-    let (dir_size_tx, dir_size_rx) = mpsc::channel::<(PathBuf, u64)>();
-    if let Some(ref target_dir) = shared_target_dir {
-        // Create the directory if it doesn't exist
-        let _ = fs::create_dir_all(target_dir);
+    let mut runner = TaskRunner::new();
 
-        // Set CARGO_TARGET_DIR for all subsequent cargo commands
-        // SAFETY: We're single-threaded at this point, before spawning any cargo commands
-        unsafe { std::env::set_var("CARGO_TARGET_DIR", target_dir) };
+    // Root tasks with no dependencies
+    let metadata_id = runner.add("metadata", load_metadata_task);
+    let git_id = runner.add("git", git_fetch_and_diff_task);
 
-        // Calculate dir size in background (it's just informational)
-        let target_dir_clone = target_dir.clone();
-        std::thread::spawn(move || {
-            let size = dir_size(&target_dir_clone);
-            let _ = dir_size_tx.send((target_dir_clone, size));
+    // Compute affected crates from metadata + git info
+    let affected_id = runner.add_dep2(
+        "affected",
+        metadata_id,
+        git_id,
+        compute_affected_crates_task,
+    );
+
+    // Workspace-wide checks (no deps on affected crates)
+    if config.pre_push.clippy {
+        let features = config.pre_push.clippy_features.clone();
+        runner.add("clippy", move || clippy_task(features));
+    }
+
+    if config.pre_push.cargo_shear {
+        runner.add("cargo-shear", cargo_shear_task);
+    }
+
+    // Crate-specific checks (depend on affected crates)
+    if config.pre_push.nextest {
+        runner.add_dep1("build tests", affected_id, build_tests_task);
+        runner.add_dep1("run tests", affected_id, run_tests_task);
+    }
+
+    if config.pre_push.doc_tests {
+        let features = config.pre_push.doc_test_features.clone();
+        runner.add_dep1("doc tests", affected_id, move |affected| {
+            doc_tests_task(affected, features)
         });
     }
 
-    // Create progress tracker for setup phase - must be before any spawned tasks
-    let progress = TaskProgress::new();
+    if config.pre_push.docs {
+        let features = config.pre_push.docs_features.clone();
+        runner.add_dep1("docs", affected_id, move |affected| {
+            docs_task(affected, features)
+        });
+    }
 
-    // Spawn git fetch in background - we'll check the result at the end
-    let fetch_spinner = progress.add_task("fetch");
-    let fetch_start = std::time::Instant::now();
-    let fetch_handle = std::thread::spawn(|| {
-        Command::new("git")
-            .args(["fetch", "origin", "main"])
-            .output()
-    });
+    // Run all tasks
+    let results = runner.run();
 
-    // Load workspace metadata
-    let metadata_spinner = progress.add_task("metadata");
-    let metadata_start = std::time::Instant::now();
-    let metadata = match cargo_metadata::MetadataCommand::new().exec() {
+    // Check for failures
+    if results.has_failures() {
+        results.print_failures();
+        std::process::exit(1);
+    }
+
+    println!();
+    println!("{} {}", "✅".green(), "All checks passed!".green().bold());
+
+    std::process::exit(0);
+}
+
+// ============================================================================
+// Task functions
+// ============================================================================
+
+fn load_metadata_task() -> TaskResult<Metadata> {
+    match cargo_metadata::MetadataCommand::new().exec() {
         Ok(m) => {
-            metadata_spinner.succeed(metadata_start.elapsed().as_secs_f32());
-            m
+            // If this is a virtual workspace with no members, skip checks
+            if m.workspace_members.is_empty() {
+                return TaskResult::failed(
+                    "empty workspace",
+                    "No workspace members found, skipping pre-push checks",
+                );
+            }
+            TaskResult::success(m)
         }
         Err(e) => {
-            metadata_spinner.fail(metadata_start.elapsed().as_secs_f32());
             let err_str = e.to_string();
             // No Cargo.toml in this directory - not a Rust project
             if err_str.contains("could not find") {
-                println!(
-                    "{}",
-                    "No Cargo.toml found, skipping pre-push checks".yellow()
+                return TaskResult::failed(
+                    "no Cargo.toml",
+                    "No Cargo.toml found, skipping pre-push checks",
                 );
-                std::process::exit(0);
             }
             // Check if this is an empty virtual workspace (no members)
             if err_str.contains("virtual manifest")
                 || err_str.contains("no members")
                 || err_str.contains("workspace has no members")
             {
-                println!(
-                    "{}",
-                    "No workspace members found, skipping pre-push checks".yellow()
-                );
-                std::process::exit(0);
-            }
-            error!("Failed to get workspace metadata: {}", e);
-            std::process::exit(1);
-        }
-    };
-
-    // If this is a virtual workspace with no members, skip checks
-    if metadata.workspace_members.is_empty() {
-        println!(
-            "{}",
-            "No workspace members found, skipping pre-push checks".yellow()
-        );
-        std::process::exit(0);
-    }
-
-    let workspace_root = metadata.workspace_root.clone().into_std_path_buf();
-
-    // Type alias for background task results
-    type CommandResult = (
-        Vec<String>,
-        Result<std::process::Output, std::io::Error>,
-        Duration,
-    );
-
-    // Start workspace-wide checks immediately (don't wait for git fetch/diff)
-    // These don't need to know which specific crates changed
-
-    // 1. Run clippy on entire workspace
-    let clippy_spinner = if config.pre_push.clippy {
-        Some(progress.add_task("clippy"))
-    } else {
-        None
-    };
-
-    if let Some(ref spinner) = clippy_spinner {
-        let start = std::time::Instant::now();
-        let mut clippy_command = vec!["cargo".to_string(), "clippy".to_string()];
-        clippy_command.push("--workspace".to_string());
-        clippy_command.push("--all-targets".to_string());
-        // Use configured features, or --all-features if not specified
-        match &config.pre_push.clippy_features {
-            None => {
-                clippy_command.push("--all-features".to_string());
-            }
-            Some(features) if !features.is_empty() => {
-                clippy_command.push("--features".to_string());
-                clippy_command.push(features.join(","));
-            }
-            Some(_) => {
-                // Empty features list means no extra features
-            }
-        }
-        clippy_command.extend(vec![
-            "--".to_string(),
-            "-D".to_string(),
-            "warnings".to_string(),
-        ]);
-
-        let clippy_output = run_command_with_spinner(&clippy_command, &[], spinner);
-        let elapsed = start.elapsed();
-
-        match clippy_output {
-            Ok(output) if output.status.success() => {
-                spinner.succeed(elapsed.as_secs_f32());
-            }
-            Ok(output) => {
-                spinner.fail(elapsed.as_secs_f32());
-                let hint_command = clippy_command.clone();
-                exit_with_command_failure(
-                    &clippy_command,
-                    &[],
-                    output,
-                    Some(Box::new(move || print_clippy_fix_hint(&hint_command))),
+                return TaskResult::failed(
+                    "empty workspace",
+                    "No workspace members found, skipping pre-push checks",
                 );
             }
-            Err(e) => {
-                spinner.fail(elapsed.as_secs_f32());
-                let hint_command = clippy_command.clone();
-                exit_with_command_error(
-                    &clippy_command,
-                    &[],
-                    e,
-                    Some(Box::new(move || print_clippy_fix_hint(&hint_command))),
-                );
-            }
+            TaskResult::failed("failed to load", e.to_string())
         }
     }
+}
 
-    // 2. Spawn cargo-shear in background (completely independent)
-    let shear_spinner = if config.pre_push.cargo_shear {
-        Some(progress.add_task("cargo-shear"))
-    } else {
-        None
+fn git_fetch_and_diff_task() -> TaskResult<GitInfo> {
+    // Fetch from origin
+    let fetch_output = Command::new("git")
+        .args(["fetch", "origin", "main"])
+        .output();
+
+    let fetch_failed = match &fetch_output {
+        Ok(output) if !output.status.success() => true,
+        Err(_) => true,
+        _ => false,
     };
 
-    let shear_handle: Option<std::thread::JoinHandle<CommandResult>> =
-        if config.pre_push.cargo_shear {
-            let handle = std::thread::spawn(move || {
-                let start = std::time::Instant::now();
-                let shear_command = vec!["cargo".to_string(), "shear".to_string()];
-                let mut cmd = command_with_color(&shear_command[0]);
-                for arg in &shear_command[1..] {
-                    cmd.arg(arg);
-                }
-                cmd.stdout(Stdio::piped());
-                cmd.stderr(Stdio::piped());
-                let output = cmd.output();
-                let elapsed = start.elapsed();
-                (shear_command, output, elapsed)
-            });
-            Some(handle)
-        } else {
-            None
-        };
-
-    // Get the set of workspace member crate IDs
-    let workspace_member_ids: HashSet<_> = metadata
-        .workspace_members
-        .iter()
-        .map(|id| id.repr.clone())
-        .collect();
-
-    // Get the set of excluded crate names (those that are packages but not workspace members)
-    let excluded_crates: HashSet<String> = metadata
-        .packages
-        .iter()
-        .filter(|pkg| !workspace_member_ids.contains(&pkg.id.repr))
-        .map(|pkg| pkg.name.to_string())
-        .collect();
-
-    // Wait for git fetch to complete before checking changed files
-    // This ensures origin/main is up-to-date for an accurate diff
-    let fetch_result = fetch_handle.join();
-    let fetch_elapsed = fetch_start.elapsed().as_secs_f32();
-    let fetch_failed = match &fetch_result {
-        Ok(Ok(output)) if !output.status.success() => {
-            fetch_spinner.fail(fetch_elapsed);
-            warn!(
-                "Failed to fetch from origin: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-            true
-        }
-        Ok(Err(e)) => {
-            fetch_spinner.fail(fetch_elapsed);
-            warn!("Failed to run git fetch: {}", e);
-            true
-        }
-        Err(_) => {
-            fetch_spinner.fail(fetch_elapsed);
-            warn!("git fetch thread panicked");
-            true
-        }
-        Ok(Ok(_)) => false,
-    };
-
-    // Get commit range info for display
+    // Get commit range info
     let origin_main_sha = Command::new("git")
         .args(["rev-parse", "--short", "origin/main"])
         .output()
@@ -323,75 +233,73 @@ pub fn run_pre_push(config: CaptainConfig) {
         })
         .unwrap_or(0);
 
-    // Update fetch spinner with commit range info
-    let commit_label = if commit_count == 1 {
-        "commit"
-    } else {
-        "commits"
-    };
-    fetch_spinner.succeed_with_message(format!(
-        "  {} {:<14} {} {}..{} ({} {})",
-        "✓".green(),
-        "fetch",
-        format!("{:.1}s", fetch_elapsed).dimmed(),
-        origin_main_sha,
-        head_sha,
-        commit_count,
-        commit_label
-    ));
-
-    // Get the list of changed files between origin/main and HEAD
-    let diff_spinner = progress.add_task("diff");
-    let diff_start = std::time::Instant::now();
-    let mut changed_files: std::collections::BTreeSet<String> = BTreeSet::new();
-
+    // Get changed files
     let diff_output = command_with_color("git")
         .args(["diff", "--name-only", "origin/main", "HEAD"])
         .output();
 
-    match diff_output {
-        Ok(output) if output.status.success() => {
-            for line in String::from_utf8_lossy(&output.stdout).lines() {
-                changed_files.insert(line.to_string());
-            }
-            diff_spinner.succeed(diff_start.elapsed().as_secs_f32());
+    let changed_files: Vec<String> = match diff_output {
+        Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(|s| s.to_string())
+            .collect(),
+        Ok(output) => {
+            return TaskResult::failed(
+                "git diff failed",
+                String::from_utf8_lossy(&output.stderr).to_string(),
+            );
         }
         Err(e) => {
-            diff_spinner.fail(diff_start.elapsed().as_secs_f32());
-            error!("Failed to get changed files: {}", e);
-            std::process::exit(1);
-        }
-        Ok(output) => {
-            diff_spinner.fail(diff_start.elapsed().as_secs_f32());
-            error!(
-                "git diff failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-            std::process::exit(1);
+            return TaskResult::failed("git diff failed", e.to_string());
         }
     };
 
-    let changed_files: Vec<_> = changed_files.into_iter().collect();
+    TaskResult::success(GitInfo {
+        origin_main_sha,
+        head_sha,
+        commit_count,
+        changed_files,
+        fetch_failed,
+    })
+}
 
-    if changed_files.is_empty() {
-        println!("{}", "No changes detected".green().bold());
-        std::process::exit(0);
+fn compute_affected_crates_task(
+    metadata: Arc<Metadata>,
+    git: Arc<GitInfo>,
+) -> TaskResult<AffectedCrates> {
+    if git.changed_files.is_empty() {
+        return TaskResult::failed("no changes", "No changes detected");
     }
 
-    // Build a map from directory to crate name using workspace packages
-    let mut dir_to_crate: std::collections::HashMap<String, String> =
-        std::collections::HashMap::new();
+    let workspace_root = metadata.workspace_root.clone().into_std_path_buf();
+
+    // Get workspace member IDs
+    let workspace_member_ids: HashSet<_> = metadata
+        .workspace_members
+        .iter()
+        .map(|id| id.repr.clone())
+        .collect();
+
+    // Get excluded crates
+    let excluded_crates: HashSet<String> = metadata
+        .packages
+        .iter()
+        .filter(|pkg| !workspace_member_ids.contains(&pkg.id.repr))
+        .map(|pkg| pkg.name.to_string())
+        .collect();
+
+    // Build directory to crate map
+    let mut dir_to_crate: HashMap<String, String> = HashMap::new();
     for package in &metadata.packages {
         if let Some(parent) = package.manifest_path.parent() {
             dir_to_crate.insert(parent.to_string(), package.name.to_string());
         }
     }
 
-    // Find which crates are affected and track which files triggered each
-    let mut crate_to_files: std::collections::HashMap<String, Vec<String>> =
-        std::collections::HashMap::new();
+    // Find affected crates
+    let mut crate_to_files: HashMap<String, Vec<String>> = HashMap::new();
 
-    for file in &changed_files {
+    for file in &git.changed_files {
         let initial_path = Path::new(file);
         let mut current_path = if initial_path.is_absolute() {
             PathBuf::from(initial_path)
@@ -399,7 +307,6 @@ pub fn run_pre_push(config: CaptainConfig) {
             workspace_root.join(initial_path)
         };
 
-        // Find the crate directory by walking up the path
         loop {
             let current_str = current_path.to_string_lossy().to_string();
             if let Some(crate_name) = dir_to_crate.get(&current_str) {
@@ -416,423 +323,248 @@ pub fn run_pre_push(config: CaptainConfig) {
         }
     }
 
-    if crate_to_files.is_empty() {
-        println!("{}", "No crates affected by changes".yellow());
-        std::process::exit(0);
-    }
-
-    // Filter affected crates to exclude those in the excluded list
+    // Filter out excluded crates
     crate_to_files.retain(|crate_name, _| !excluded_crates.contains(crate_name));
 
     if crate_to_files.is_empty() {
-        println!("{}", "No publishable crates affected by changes".yellow());
-        std::process::exit(0);
+        return TaskResult::failed(
+            "no crates affected",
+            "No publishable crates affected by changes",
+        );
     }
 
-    // Sort for consistent output
-    let affected_crates: BTreeSet<_> = crate_to_files.keys().cloned().collect();
+    let crates: BTreeSet<_> = crate_to_files.keys().cloned().collect();
 
-    // Create spinners for crate-specific tasks
-    let build_spinner = if config.pre_push.nextest {
-        Some(progress.add_task("build tests"))
-    } else {
-        None
-    };
-    let test_spinner = if config.pre_push.nextest {
-        Some(progress.add_task("run tests"))
-    } else {
-        None
-    };
-    let doctest_spinner = if config.pre_push.doc_tests {
-        Some(progress.add_task("doc tests"))
-    } else {
-        None
-    };
-    let docs_spinner = if config.pre_push.docs {
-        Some(progress.add_task("docs"))
-    } else {
-        None
-    };
+    TaskResult::success(AffectedCrates {
+        crates,
+        crate_to_files,
+    })
+}
 
-    // 1. Build nextest tests
-    let test_handle: Option<std::thread::JoinHandle<CommandResult>> = if config.pre_push.nextest {
-        let build_spinner = build_spinner.as_ref().unwrap();
-        let start = std::time::Instant::now();
-        let mut build_command = vec![
-            "cargo".to_string(),
-            "nextest".to_string(),
-            "run".to_string(),
-            "--no-run".to_string(),
-        ];
-        for crate_name in &affected_crates {
-            build_command.push("-p".to_string());
-            build_command.push(crate_name.to_string());
+fn clippy_task(features: Option<Vec<String>>) -> UnitResult {
+    let mut args = vec!["clippy", "--workspace", "--all-targets"];
+
+    let features_str: String;
+    match &features {
+        None => {
+            args.push("--all-features");
         }
-
-        let build_output = run_command_with_spinner(&build_command, &[], build_spinner);
-        let elapsed = start.elapsed();
-
-        match build_output {
-            Ok(output) if output.status.success() => {
-                build_spinner.succeed(elapsed.as_secs_f32());
-            }
-            Ok(output) => {
-                build_spinner.fail(elapsed.as_secs_f32());
-                exit_with_command_failure(&build_command, &[], output, None);
-            }
-            Err(e) => {
-                build_spinner.fail(elapsed.as_secs_f32());
-                exit_with_command_error(&build_command, &[], e, None);
-            }
+        Some(f) if !f.is_empty() => {
+            args.push("--features");
+            features_str = f.join(",");
+            args.push(&features_str);
         }
-
-        // Spawn test runner in background
-        let mut run_command = vec![
-            "cargo".to_string(),
-            "nextest".to_string(),
-            "run".to_string(),
-        ];
-        for crate_name in &affected_crates {
-            run_command.push("-p".to_string());
-            run_command.push(crate_name.to_string());
-        }
-        run_command.push("--no-tests=pass".to_string());
-
-        let handle = std::thread::spawn(move || {
-            let start = std::time::Instant::now();
-            let mut cmd = command_with_color(&run_command[0]);
-            for arg in &run_command[1..] {
-                cmd.arg(arg);
-            }
-            cmd.stdout(Stdio::piped());
-            cmd.stderr(Stdio::piped());
-            let output = cmd.output();
-            let elapsed = start.elapsed();
-            (run_command, output, elapsed)
-        });
-        Some(handle)
-    } else {
-        None
-    };
-
-    // 2. Spawn doc tests in background (independent of other tasks)
-    let doctest_handle: Option<std::thread::JoinHandle<CommandResult>> =
-        if doctest_spinner.is_some() {
-            let affected_crates_clone = affected_crates.clone();
-            let doc_test_features = config.pre_push.doc_test_features.clone();
-            let handle = std::thread::spawn(move || {
-                let start = std::time::Instant::now();
-                let mut doctest_command =
-                    vec!["cargo".to_string(), "test".to_string(), "--doc".to_string()];
-                for crate_name in &affected_crates_clone {
-                    doctest_command.push("-p".to_string());
-                    doctest_command.push(crate_name.to_string());
-                }
-                // Use configured features, or --all-features if not specified
-                match &doc_test_features {
-                    None => {
-                        doctest_command.push("--all-features".to_string());
-                    }
-                    Some(features) if !features.is_empty() => {
-                        doctest_command.push("--features".to_string());
-                        doctest_command.push(features.join(","));
-                    }
-                    Some(_) => {
-                        // Empty features list means no extra features
-                    }
-                }
-
-                let mut cmd = command_with_color(&doctest_command[0]);
-                for arg in &doctest_command[1..] {
-                    cmd.arg(arg);
-                }
-                cmd.stdout(Stdio::piped());
-                cmd.stderr(Stdio::piped());
-                let output = cmd.output();
-                let elapsed = start.elapsed();
-                (doctest_command, output, elapsed)
-            });
-            Some(handle)
-        } else {
-            None
-        };
-
-    // 3. Spawn docs build in background (independent of other tasks)
-    let docs_handle: Option<std::thread::JoinHandle<CommandResult>> = if docs_spinner.is_some() {
-        let affected_crates_clone = affected_crates.clone();
-        let docs_features = config.pre_push.docs_features.clone();
-        let handle = std::thread::spawn(move || {
-            let start = std::time::Instant::now();
-            let mut doc_command = vec![
-                "cargo".to_string(),
-                "doc".to_string(),
-                "--no-deps".to_string(),
-            ];
-            for crate_name in &affected_crates_clone {
-                doc_command.push("-p".to_string());
-                doc_command.push(crate_name.to_string());
-            }
-            // Use configured features, or --all-features if not specified
-            match &docs_features {
-                None => {
-                    doc_command.push("--all-features".to_string());
-                }
-                Some(features) if !features.is_empty() => {
-                    doc_command.push("--features".to_string());
-                    doc_command.push(features.join(","));
-                }
-                Some(_) => {
-                    // Empty features list means no extra features
-                }
-            }
-            let mut doc_cmd = command_with_color(&doc_command[0]);
-            for arg in &doc_command[1..] {
-                doc_cmd.arg(arg);
-            }
-            doc_cmd.env("RUSTDOCFLAGS", "-D warnings");
-            doc_cmd.stdout(Stdio::piped());
-            doc_cmd.stderr(Stdio::piped());
-            let output = doc_cmd.output();
-            let elapsed = start.elapsed();
-            (doc_command, output, elapsed)
-        });
-        Some(handle)
-    } else {
-        None
-    };
-
-    // 4. Wait for cargo-shear background task
-    if let Some(handle) = shear_handle {
-        let spinner = shear_spinner.as_ref().unwrap();
-
-        match handle.join() {
-            Ok((shear_command, output_result, elapsed)) => match output_result {
-                Ok(output) if output.status.success() => {
-                    spinner.succeed(elapsed.as_secs_f32());
-                }
-                Ok(output) if indicates_missing_cargo_subcommand(&output, "shear") => {
-                    spinner.skip("not installed");
-                }
-                Ok(output) => {
-                    spinner.fail(elapsed.as_secs_f32());
-                    exit_with_command_failure(
-                        &shear_command,
-                        &[],
-                        output,
-                        Some(Box::new(print_shear_fix_hint)),
-                    );
-                }
-                Err(e) => {
-                    spinner.fail(elapsed.as_secs_f32());
-                    exit_with_command_error(&shear_command, &[], e, None);
-                }
-            },
-            Err(_) => {
-                spinner.fail(0.0);
-                error!("cargo-shear thread panicked");
-                std::process::exit(1);
-            }
-        }
+        Some(_) => {}
     }
 
-    // 5. Wait for doc tests
-    if let Some(handle) = doctest_handle {
-        let spinner = doctest_spinner.as_ref().unwrap();
+    args.extend(["--", "-D", "warnings"]);
 
-        match handle.join() {
-            Ok((doctest_command, output_result, elapsed)) => match output_result {
-                Ok(output) if output.status.success() => {
-                    spinner.succeed(elapsed.as_secs_f32());
-                }
-                Ok(output) if should_skip_doc_tests(&output) => {
-                    // No lib to test - just hide this task
-                    spinner.clear();
-                }
-                Ok(output) => {
-                    spinner.fail(elapsed.as_secs_f32());
-                    exit_with_command_failure(&doctest_command, &[], output, None);
-                }
-                Err(e) => {
-                    spinner.fail(elapsed.as_secs_f32());
-                    exit_with_command_error(&doctest_command, &[], e, None);
-                }
-            },
-            Err(_) => {
-                spinner.fail(0.0);
-                error!("doc tests thread panicked");
-                std::process::exit(1);
-            }
-        }
-    }
-
-    // 6. Wait for docs build
-    if let Some(handle) = docs_handle {
-        let spinner = docs_spinner.as_ref().unwrap();
-
-        match handle.join() {
-            Ok((doc_command, output_result, elapsed)) => match output_result {
-                Ok(output) if output.status.success() => {
-                    spinner.succeed(elapsed.as_secs_f32());
-                }
-                Ok(output) => {
-                    spinner.fail(elapsed.as_secs_f32());
-                    let doc_env = [("RUSTDOCFLAGS", "-D warnings")];
-                    exit_with_command_failure(&doc_command, &doc_env, output, None);
-                }
-                Err(e) => {
-                    spinner.fail(elapsed.as_secs_f32());
-                    let doc_env = [("RUSTDOCFLAGS", "-D warnings")];
-                    exit_with_command_error(&doc_command, &doc_env, e, None);
-                }
-            },
-            Err(_) => {
-                spinner.fail(0.0);
-                error!("docs build thread panicked");
-                std::process::exit(1);
-            }
-        }
-    }
-
-    // 7. Wait for test results
-    if let Some(handle) = test_handle {
-        let spinner = test_spinner.as_ref().unwrap();
-
-        match handle.join() {
-            Ok((run_command, output_result, elapsed)) => match output_result {
-                Ok(output) if output.status.success() => {
-                    spinner.succeed(elapsed.as_secs_f32());
-                }
-                Ok(output) => {
-                    spinner.fail(elapsed.as_secs_f32());
-                    exit_with_command_failure(&run_command, &[], output, None);
-                }
-                Err(e) => {
-                    spinner.fail(elapsed.as_secs_f32());
-                    exit_with_command_error(&run_command, &[], e, None);
-                }
-            },
-            Err(_) => {
-                spinner.fail(0.0);
-                error!("test runner thread panicked");
-                std::process::exit(1);
-            }
-        }
-    }
-
-    println!();
-    println!("{} {}", "✅".green(), "All checks passed!".green().bold());
-
-    // Print affected crates summary
-    println!();
-    println!("{}", "Dirty crates:".cyan().bold());
-    for crate_name in &affected_crates {
-        if let Some(files) = crate_to_files.get(crate_name) {
-            let file_list = if files.len() <= 3 {
-                files.join(", ")
-            } else {
-                format!("{}, ... (+{} more)", files[..3].join(", "), files.len() - 3)
-            };
-            println!(
-                "  {} {}",
-                format!("{}:", crate_name).yellow(),
-                file_list.dimmed()
-            );
-        }
-    }
-
-    // Print shared target dir size (non-blocking check)
-    if shared_target_dir.is_some() {
-        // Try to receive with a short timeout - don't block if still calculating
-        if let Ok((target_dir, size)) = dir_size_rx.recv_timeout(Duration::from_millis(100)) {
-            println!(
-                "   {} {} ({})",
-                "Target:".dimmed(),
-                target_dir.display().to_string().blue(),
-                format_size(size).dimmed()
-            );
-        }
-    }
-
-    // Check if fetch failed earlier (we already waited for it before diffing)
-    print!("   {} ", "Branch:".dimmed());
-    io::stdout().flush().unwrap();
-
-    if fetch_failed {
-        println!("{}", "fetch failed".red());
-        std::process::exit(1);
-    }
-
-    // Check if current branch is fast-forward to origin/main
-    let merge_base_output = command_with_color("git")
-        .args(["merge-base", "HEAD", "origin/main"])
+    let output = command_with_color("cargo")
+        .args(&args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .output();
 
-    let merge_base = match merge_base_output {
-        Ok(output) if output.status.success() => {
-            String::from_utf8_lossy(&output.stdout).trim().to_string()
+    match output {
+        Ok(o) if o.status.success() => TaskResult::success(()),
+        Ok(o) => {
+            let details = format_command_failure(&["cargo".to_string()], &args, &o);
+            TaskResult::failed("clippy errors", details)
         }
-        _ => {
-            println!("{}", "failed".red());
-            error!("Failed to find merge base with origin/main");
-            std::process::exit(1);
-        }
-    };
-
-    // Get origin/main rev
-    let origin_main_rev = match command_with_color("git")
-        .args(["rev-parse", "origin/main"])
-        .output()
-    {
-        Ok(output) if output.status.success() => {
-            String::from_utf8_lossy(&output.stdout).trim().to_string()
-        }
-        _ => {
-            println!("{}", "failed".red());
-            error!("Failed to get origin/main revision");
-            std::process::exit(1);
-        }
-    };
-
-    // Check if origin/main is ahead of merge_base (meaning we need to rebase)
-    if origin_main_rev != merge_base {
-        println!("{}", "rebase needed".yellow());
-        println!();
-        println!(
-            "{} {}",
-            "⚠️".yellow(),
-            "Your branch has diverged from origin/main".yellow().bold()
-        );
-        println!("  Please rebase your changes and push again:");
-        println!("    {}", "git rebase origin/main".cyan());
-        std::process::exit(1);
-    }
-
-    println!("{}", "up to date with origin/main".dimmed());
-    std::process::exit(0);
-}
-
-/// Get the shared target directory for pre-push checks (~/.captain/target)
-fn get_shared_target_dir() -> Option<PathBuf> {
-    dirs::home_dir().map(|home| home.join(".captain").join("target"))
-}
-
-fn shell_escape(part: &str) -> String {
-    if part
-        .chars()
-        .all(|c| !c.is_whitespace() && c != '"' && c != '\'' && c != '\\')
-    {
-        part.to_string()
-    } else {
-        format!("{:?}", part)
+        Err(e) => TaskResult::failed("failed to run", e.to_string()),
     }
 }
 
-fn format_command_line(parts: &[String]) -> String {
-    parts
+fn cargo_shear_task() -> UnitResult {
+    let output = command_with_color("cargo")
+        .args(["shear"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output();
+
+    match output {
+        Ok(o) if o.status.success() => TaskResult::success(()),
+        Ok(o) if indicates_missing_cargo_subcommand(&o, "shear") => {
+            TaskResult::skipped("not installed")
+        }
+        Ok(o) => {
+            let details = format_command_failure(&["cargo".to_string()], &["shear"], &o);
+            TaskResult::failed("unused deps", details)
+        }
+        Err(e) => TaskResult::failed("failed to run", e.to_string()),
+    }
+}
+
+fn build_tests_task(affected: Arc<AffectedCrates>) -> UnitResult {
+    let mut args = vec!["nextest", "run", "--no-run"];
+
+    for crate_name in &affected.crates {
+        args.push("-p");
+        args.push(crate_name);
+    }
+
+    let output = command_with_color("cargo")
+        .args(&args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output();
+
+    match output {
+        Ok(o) if o.status.success() => TaskResult::success(()),
+        Ok(o) => {
+            let details = format_command_failure(&["cargo".to_string()], &args, &o);
+            TaskResult::failed("build failed", details)
+        }
+        Err(e) => TaskResult::failed("failed to run", e.to_string()),
+    }
+}
+
+fn run_tests_task(affected: Arc<AffectedCrates>) -> UnitResult {
+    let mut args = vec!["nextest", "run"];
+
+    for crate_name in &affected.crates {
+        args.push("-p");
+        args.push(crate_name);
+    }
+    args.push("--no-tests=pass");
+
+    let output = command_with_color("cargo")
+        .args(&args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output();
+
+    match output {
+        Ok(o) if o.status.success() => TaskResult::success(()),
+        Ok(o) => {
+            let details = format_command_failure(&["cargo".to_string()], &args, &o);
+            TaskResult::failed("tests failed", details)
+        }
+        Err(e) => TaskResult::failed("failed to run", e.to_string()),
+    }
+}
+
+fn doc_tests_task(affected: Arc<AffectedCrates>, features: Option<Vec<String>>) -> UnitResult {
+    let mut args = vec!["test", "--doc"];
+
+    for crate_name in &affected.crates {
+        args.push("-p");
+        args.push(crate_name);
+    }
+
+    let features_str: String;
+    match &features {
+        None => {
+            args.push("--all-features");
+        }
+        Some(f) if !f.is_empty() => {
+            args.push("--features");
+            features_str = f.join(",");
+            args.push(&features_str);
+        }
+        Some(_) => {}
+    }
+
+    let output = command_with_color("cargo")
+        .args(&args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output();
+
+    match output {
+        Ok(o) if o.status.success() => TaskResult::success(()),
+        Ok(o) if should_skip_doc_tests(&o) => TaskResult::skipped("no lib to test"),
+        Ok(o) => {
+            let details = format_command_failure(&["cargo".to_string()], &args, &o);
+            TaskResult::failed("doc tests failed", details)
+        }
+        Err(e) => TaskResult::failed("failed to run", e.to_string()),
+    }
+}
+
+fn docs_task(affected: Arc<AffectedCrates>, features: Option<Vec<String>>) -> UnitResult {
+    let mut args = vec!["doc", "--no-deps"];
+
+    for crate_name in &affected.crates {
+        args.push("-p");
+        args.push(crate_name);
+    }
+
+    let features_str: String;
+    match &features {
+        None => {
+            args.push("--all-features");
+        }
+        Some(f) if !f.is_empty() => {
+            args.push("--features");
+            features_str = f.join(",");
+            args.push(&features_str);
+        }
+        Some(_) => {}
+    }
+
+    let output = command_with_color("cargo")
+        .args(&args)
+        .env("RUSTDOCFLAGS", "-D warnings")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output();
+
+    match output {
+        Ok(o) if o.status.success() => TaskResult::success(()),
+        Ok(o) => {
+            let details = format_command_failure(&["cargo".to_string()], &args, &o);
+            TaskResult::failed("doc warnings", details)
+        }
+        Err(e) => TaskResult::failed("failed to run", e.to_string()),
+    }
+}
+
+// ============================================================================
+// Helper functions
+// ============================================================================
+
+fn setup_shared_target_dir() {
+    if let Some(home) = dirs::home_dir() {
+        let target_dir = home.join(".captain").join("target");
+        let _ = fs::create_dir_all(&target_dir);
+        // SAFETY: We're single-threaded at this point
+        unsafe { std::env::set_var("CARGO_TARGET_DIR", &target_dir) };
+    }
+}
+
+fn format_command_failure(cmd: &[String], args: &[&str], output: &std::process::Output) -> String {
+    let mut details = String::new();
+
+    let full_cmd: Vec<String> = cmd
         .iter()
-        .map(|p| shell_escape(p))
-        .collect::<Vec<_>>()
-        .join(" ")
+        .cloned()
+        .chain(args.iter().map(|s| s.to_string()))
+        .collect();
+    details.push_str(&format!("command: {}\n", full_cmd.join(" ")));
+
+    match output.status.code() {
+        Some(code) => details.push_str(&format!("exit code: {}\n", code)),
+        None => details.push_str("exit code: terminated by signal\n"),
+    }
+
+    if !output.stdout.is_empty() {
+        let cleaned = maybe_strip_bytes(&output.stdout, ColorStream::Stdout);
+        details.push_str(&format!(
+            "stdout:\n{}\n",
+            String::from_utf8_lossy(&cleaned).trim_end()
+        ));
+    }
+
+    if !output.stderr.is_empty() {
+        let cleaned = maybe_strip_bytes(&output.stderr, ColorStream::Stderr);
+        details.push_str(&format!(
+            "stderr:\n{}\n",
+            String::from_utf8_lossy(&cleaned).trim_end()
+        ));
+    }
+
+    details
 }
 
 fn cargo_subcommand_missing_message(stderr: &str, subcommand: &str) -> bool {
@@ -850,93 +582,6 @@ fn cargo_subcommand_missing_message(stderr: &str, subcommand: &str) -> bool {
 
 fn indicates_missing_cargo_subcommand(output: &std::process::Output, subcommand: &str) -> bool {
     cargo_subcommand_missing_message(&String::from_utf8_lossy(&output.stderr), subcommand)
-}
-
-fn print_clippy_fix_hint(command: &[String]) {
-    let mut fix_command = Vec::with_capacity(command.len() + 2);
-    let mut inserted = false;
-
-    for part in command {
-        if !inserted && part == "--" {
-            fix_command.push("--allow-dirty".to_string());
-            fix_command.push("--fix".to_string());
-            inserted = true;
-        }
-        fix_command.push(part.clone());
-    }
-
-    if !inserted {
-        fix_command.push("--allow-dirty".to_string());
-        fix_command.push("--fix".to_string());
-    }
-
-    println!(
-        "    {} Try auto-fixing with:\n        {}\n        git commit --amend --no-edit",
-        "💡".cyan(),
-        format_command_line(&fix_command)
-    );
-}
-
-fn print_shear_fix_hint() {
-    println!(
-        "    {} Try cleaning unused dependencies with:\n        cargo shear --fix",
-        "💡".cyan()
-    );
-}
-
-fn print_stream(label: &str, data: &[u8], stream: ColorStream) {
-    if data.is_empty() {
-        println!("    {}: <empty>", label);
-    } else {
-        let cleaned = maybe_strip_bytes(data, stream);
-        let text = String::from_utf8_lossy(&cleaned);
-        println!("    {}:\n{}", label, text.trim_end());
-    }
-}
-
-fn print_env_vars(envs: &[(&str, &str)]) {
-    for (key, value) in envs {
-        println!("    env: {}={}", key, value);
-    }
-}
-
-fn exit_with_command_failure(
-    command: &[String],
-    envs: &[(&str, &str)],
-    output: std::process::Output,
-    hint: Option<Box<dyn FnOnce()>>,
-) -> ! {
-    println!("    command: {}", format_command_line(command));
-    if !envs.is_empty() {
-        print_env_vars(envs);
-    }
-    match output.status.code() {
-        Some(code) => println!("    exit code: {}", code),
-        None => println!("    exit code: terminated by signal"),
-    }
-    print_stream("stdout", &output.stdout, ColorStream::Stdout);
-    print_stream("stderr", &output.stderr, ColorStream::Stderr);
-    if let Some(action) = hint {
-        action();
-    }
-    std::process::exit(1);
-}
-
-fn exit_with_command_error(
-    command: &[String],
-    envs: &[(&str, &str)],
-    error: std::io::Error,
-    hint: Option<Box<dyn FnOnce()>>,
-) -> ! {
-    println!("    command: {}", format_command_line(command));
-    if !envs.is_empty() {
-        print_env_vars(envs);
-    }
-    println!("    error: {}", error);
-    if let Some(action) = hint {
-        action();
-    }
-    std::process::exit(1);
 }
 
 fn should_skip_doc_tests(output: &std::process::Output) -> bool {
