@@ -29,12 +29,19 @@ pub fn run_clean() {
     let size_str = format_size(size);
     spinner.clear();
 
+    // Replace home dir with ~ for display
+    let path_display = if let Some(home) = dirs::home_dir() {
+        if let Ok(suffix) = target_dir.strip_prefix(&home) {
+            format!("~/{}", suffix.display())
+        } else {
+            target_dir.display().to_string()
+        }
+    } else {
+        target_dir.display().to_string()
+    };
+
     println!("Captain's shared target directory:");
-    println!(
-        "  {} {}",
-        target_dir.display().to_string().cyan(),
-        size_str.yellow().bold()
-    );
+    println!("  {} {}", path_display.cyan(), size_str.yellow().bold());
     println!();
 
     print!("Delete this directory? [y/N] ");

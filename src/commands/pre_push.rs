@@ -161,13 +161,19 @@ pub fn run_pre_push(config: CaptainConfig) {
         } else {
             size_str.dimmed().to_string()
         };
-        print!(
-            "📦 {} {}",
-            info.path.display().to_string().dimmed(),
-            size_colored
-        );
+        // Replace home dir with ~ for display
+        let path_display = if let Some(home) = dirs::home_dir() {
+            if let Ok(suffix) = info.path.strip_prefix(&home) {
+                format!("~/{}", suffix.display())
+            } else {
+                info.path.display().to_string()
+            }
+        } else {
+            info.path.display().to_string()
+        };
+        print!("📦 {} {}", path_display.dimmed(), size_colored);
         if is_large {
-            print!(" {}", "(run 'captain clean' to remove)".dimmed());
+            print!(" {}", "(cf. 'captain clean')".dimmed());
         }
         println!();
     }
