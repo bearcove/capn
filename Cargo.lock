@@ -464,6 +464,7 @@ dependencies = [
  "facet-core",
  "facet-format",
  "facet-reflect",
+ "figue",
  "serde_json",
  "styx-format",
  "styx-parse",
