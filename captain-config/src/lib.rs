@@ -39,6 +39,11 @@ pub struct PreCommitConfig {
     /// Require Rust edition 2024 in all workspace crates.
     #[facet(default = true)]
     pub edition_2024: bool,
+
+    /// Check for path dependencies pointing outside the workspace.
+    /// These are typically local development overrides that should not be committed.
+    #[facet(default = true)]
+    pub external_path_deps: bool,
 }
 
 /// Configuration for pre-push hooks.

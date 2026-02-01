@@ -1,0 +1,8 @@
+[package]
+name = "my-crate"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# This points OUTSIDE the workspace - should be detected as bad
+external-crate = { path = "../../external_crate" }

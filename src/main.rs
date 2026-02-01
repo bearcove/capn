@@ -283,6 +283,52 @@ fn check_edition_2024(metadata: &cargo_metadata::Metadata) {
     }
 }
 
+/// Check for path dependencies that point outside the workspace.
+/// These are typically local development overrides that should not be committed.
+/// Bails with an error if any are found.
+fn check_external_path_deps(metadata: &cargo_metadata::Metadata) {
+    let workspace_root = &metadata.workspace_root;
+
+    let external_deps: Vec<_> = metadata
+        .packages
+        .iter()
+        .filter(|pkg| {
+            // source == None means it's a path dependency (not from crates.io or git)
+            pkg.source.is_none()
+        })
+        .filter(|pkg| {
+            // Check if manifest_path is outside workspace_root
+            !pkg.manifest_path.starts_with(workspace_root)
+        })
+        .collect();
+
+    if external_deps.is_empty() {
+        return;
+    }
+
+    error!("{}", "External path dependencies detected!".red().bold());
+    error!("");
+    error!(
+        "The following path dependencies point outside the workspace root ({}):",
+        workspace_root
+    );
+    error!("");
+    for pkg in &external_deps {
+        error!(
+            "  {} {} → {}",
+            "✗".red(),
+            pkg.name.as_str().yellow(),
+            pkg.manifest_path.parent().unwrap_or(&pkg.manifest_path)
+        );
+    }
+    error!("");
+    error!("These are typically local development overrides (e.g., in [patch] sections)");
+    error!("that should not be committed. They will break builds for other developers.");
+    error!("");
+    error!("To fix: comment out or remove the path dependencies before committing.");
+    std::process::exit(1);
+}
+
 enum ConfigFormat {
     Styx,
     Yaml,
@@ -2424,6 +2470,11 @@ fn main() {
     // Check edition 2024 requirement (bails if not met)
     if config.pre_commit.edition_2024 {
         check_edition_2024(&metadata);
+    }
+
+    // Check for external path dependencies (bails if found)
+    if config.pre_commit.external_path_deps {
+        check_external_path_deps(&metadata);
     }
 
     // Use a channel to collect jobs from all tasks.

@@ -1,0 +1,7 @@
+[workspace]
+members = ["my-crate"]
+resolver = "2"
+
+[patch.crates-io]
+# This points OUTSIDE the workspace - should be detected as bad
+external-crate = { path = "../external_crate" }
