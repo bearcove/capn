@@ -153,6 +153,7 @@ enum Event {
 
 /// Pending task waiting for dependencies
 struct PendingTask {
+    id: u64,
     name: String,
     deps: Vec<u64>,
     /// Creates the BoxedTask once dependencies are resolved
@@ -229,6 +230,7 @@ impl TaskRunner {
         let name = name.into();
 
         self.pending.push(PendingTask {
+            id: id.raw(),
             name,
             deps: vec![],
             make_task: Box::new(move |_outputs| Box::new(move || run_task(task))),
@@ -254,6 +256,7 @@ impl TaskRunner {
         let dep_id = dep.raw();
 
         self.pending.push(PendingTask {
+            id: id.raw(),
             name,
             deps: vec![dep_id],
             make_task: Box::new(move |outputs| {
@@ -291,6 +294,7 @@ impl TaskRunner {
         let dep2_id = dep2.raw();
 
         self.pending.push(PendingTask {
+            id: id.raw(),
             name,
             deps: vec![dep1_id, dep2_id],
             make_task: Box::new(move |outputs| {
@@ -324,11 +328,7 @@ impl TaskRunner {
         // Currently running tasks
         let mut running: HashMap<u64, RunningTask> = HashMap::new();
         // Tasks waiting for dependencies
-        let mut waiting: Vec<(u64, PendingTask)> = self
-            .pending
-            .into_iter()
-            .map(|p| (NEXT_ID.fetch_add(1, Ordering::SeqCst), p))
-            .collect();
+        let mut waiting: Vec<PendingTask> = self.pending;
         // Collected results
         let mut results = Vec::new();
 
@@ -340,16 +340,9 @@ impl TaskRunner {
         // Initial spawn of tasks with no dependencies
         let mut i = 0;
         while i < waiting.len() {
-            if deps_ready(&waiting[i].1.deps, &outputs) {
-                let (id, pending) = waiting.remove(i);
-                spawn_pending(
-                    id,
-                    pending,
-                    &self.progress,
-                    &event_tx,
-                    &mut running,
-                    &outputs,
-                );
+            if deps_ready(&waiting[i].deps, &outputs) {
+                let pending = waiting.remove(i);
+                spawn_pending(pending, &self.progress, &event_tx, &mut running, &outputs);
             } else {
                 i += 1;
             }
@@ -380,10 +373,9 @@ impl TaskRunner {
                     // Check if any waiting tasks can now run
                     let mut i = 0;
                     while i < waiting.len() {
-                        if deps_ready(&waiting[i].1.deps, &outputs) {
-                            let (id, pending) = waiting.remove(i);
+                        if deps_ready(&waiting[i].deps, &outputs) {
+                            let pending = waiting.remove(i);
                             spawn_pending(
-                                id,
                                 pending,
                                 &self.progress,
                                 &event_tx,
@@ -416,13 +408,13 @@ fn run_task<T: Send + Sync + 'static>(task: impl FnOnce() -> TaskResult<T>) -> I
 
 /// Spawn a pending task
 fn spawn_pending(
-    id: u64,
     pending: PendingTask,
     progress: &TaskProgress,
     event_tx: &mpsc::Sender<Event>,
     running: &mut HashMap<u64, RunningTask>,
     outputs: &HashMap<u64, Box<dyn CloneAny>>,
 ) {
+    let id = pending.id;
     let spinner = progress.add_task(&pending.name);
     let name = pending.name.clone();
 
