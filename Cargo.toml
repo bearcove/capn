@@ -23,14 +23,16 @@ rustdoc-args = ["--html-in-header", "arborium-header.html"]
 captain-config = { path = "captain-config" }
 cargo_metadata = "0.23.1"
 dirs = "6"
-facet-styx = { git = "https://github.com/bearcove/styx", branch = "main" }
+facet = { git = "https://github.com/facet-rs/facet", branch = "main" }
+facet-styx = { git = "https://github.com/bearcove/styx", branch = "main", features = ["figue"] }
+figue = { git = "https://github.com/bearcove/figue", branch = "main" }
 styx-embed = { git = "https://github.com/bearcove/styx", branch = "main" }
-facet-yaml = { git = "https://github.com/facet-rs/facet", branch = "main" }
-miette = { version = "7", default-features = false, features = ["fancy-no-backtrace"] }
+
+
 fs-err = "3.2.2"
-log = { version = "0.4.29", features = ["std"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 owo-colors = "4.2.3"
-serde_json = "1.0.149"
 toml_edit = "0.24"
 supports-color = "3.0.2"
 strip-ansi-escapes = "0.2.1"

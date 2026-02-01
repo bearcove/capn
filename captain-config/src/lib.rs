@@ -3,7 +3,7 @@
 //! This is a separate crate so build.rs can generate schemas from these types.
 
 /// Configuration read from `.config/captain/config.styx`
-#[derive(Debug, facet::Facet)]
+#[derive(Debug, Clone, facet::Facet)]
 #[facet(derive(Default), traits(Default))]
 #[facet(rename_all = "kebab-case")]
 pub struct CaptainConfig {
@@ -17,7 +17,7 @@ pub struct CaptainConfig {
 }
 
 /// Configuration for pre-commit hooks.
-#[derive(Debug, facet::Facet)]
+#[derive(Debug, Clone, facet::Facet)]
 #[facet(rename_all = "kebab-case", traits(Default), derive(Default))]
 pub struct PreCommitConfig {
     /// Generate `README.md` files from `README.md.in` templates.
@@ -47,7 +47,7 @@ pub struct PreCommitConfig {
 }
 
 /// Configuration for pre-push hooks.
-#[derive(Debug, facet::Facet)]
+#[derive(Debug, Clone, facet::Facet)]
 #[facet(rename_all = "kebab-case", traits(Default), derive(Default))]
 pub struct PrePushConfig {
     /// Run `cargo clippy` with warnings as errors.
