@@ -3,8 +3,6 @@
 //! These checks return errors instead of printing/exiting directly,
 //! so callers can properly integrate with the spinner infrastructure.
 
-use std::fmt::Write;
-
 /// Error from a validation check, with formatted details for display.
 pub struct CheckError {
     pub summary: String,

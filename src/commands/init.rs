@@ -1,11 +1,17 @@
 //! Captain initialization command.
 
-// Move from main.rs:
-// - run_init (lines 2056-2320)
-// - prompt_yes_no (lines 2039-2054)
+use crate::jobs::workspace_name_from_metadata_object;
+use log::error;
+use owo_colors::OwoColorize;
+use std::fs;
+use std::io::{self, Write};
+use std::process::Command;
+
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 
 /// Initialize captain in the current repository
-fn run_init() {
+pub fn run_init() {
     println!("{}", "Captain initialization".cyan().bold());
     println!();
 

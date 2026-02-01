@@ -1,7 +1,13 @@
 //! Rustfmt formatting jobs.
 
 use super::Job;
-use crate::StagedFiles;
+use crate::{StagedFiles, command_with_color, maybe_strip_bytes};
+use log::{debug, error};
+use owo_colors::OwoColorize;
+use std::fs;
+use std::io::Write;
+use std::process::Stdio;
+use supports_color::Stream as ColorStream;
 
 pub fn enqueue_rustfmt_jobs(sender: std::sync::mpsc::Sender<Job>, staged_files: &StagedFiles) {
     use log::trace;

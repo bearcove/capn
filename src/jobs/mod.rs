@@ -7,7 +7,7 @@ mod rustfmt;
 
 pub use arborium::enqueue_arborium_jobs;
 pub use cargo_lock::enqueue_cargo_lock_jobs;
-pub use readme::enqueue_readme_jobs;
+pub use readme::{enqueue_readme_jobs, workspace_name_from_metadata_object};
 pub use rustfmt::enqueue_rustfmt_jobs;
 
 use crate::command_with_color;

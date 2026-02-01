@@ -1,7 +1,11 @@
 //! README.md generation from templates.
 
 use super::Job;
-use crate::StagedFiles;
+use crate::{StagedFiles, command_with_color, readme};
+use log::{error, warn};
+use owo_colors::OwoColorize;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 pub fn enqueue_readme_jobs(
     sender: std::sync::mpsc::Sender<Job>,
@@ -226,7 +230,7 @@ pub fn enqueue_readme_jobs(
 }
 
 /// Get the workspace name from cargo metadata (the root package name or first default member)
-fn workspace_name_from_metadata_object(
+pub fn workspace_name_from_metadata_object(
     metadata: &cargo_metadata::Metadata,
 ) -> Result<String, String> {
     // Convert metadata to JSON for easier traversal

@@ -1,6 +1,10 @@
 //! Cargo.lock staging jobs.
 
 use super::Job;
+use crate::command_with_color;
+use log::error;
+use std::fs;
+use std::path::Path;
 
 pub fn enqueue_cargo_lock_jobs(sender: std::sync::mpsc::Sender<Job>) {
     let lock_path = Path::new("Cargo.lock");

@@ -1,14 +1,18 @@
 //! Arborium header and docs.rs metadata jobs.
 
 use super::Job;
+use log::error;
 use std::collections::HashSet;
+use std::fs;
+use std::path::{Path, PathBuf};
+use toml_edit::{Array, DocumentMut, Item, Table, Value};
 
 // Move from main.rs:
 // - ensure_docsrs_metadata (lines 187-222)
 
 pub fn enqueue_arborium_jobs(
-    _sender: std::sync::mpsc::Sender<Job>,
-    _metadata: &cargo_metadata::Metadata,
+    sender: std::sync::mpsc::Sender<Job>,
+    metadata: &cargo_metadata::Metadata,
 ) {
     // Get workspace members
     let workspace_member_ids: HashSet<_> = metadata

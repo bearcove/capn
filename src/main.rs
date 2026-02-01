@@ -1,26 +1,32 @@
-use log::{Level, LevelFilter, Log, Metadata, Record, debug, error, warn};
+use log::{Level, LevelFilter, Log, Metadata, Record, debug, error};
 use owo_colors::{OwoColorize, Style};
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
 use std::sync::mpsc;
 use std::{
     borrow::Cow,
     ffi::OsStr,
-    fs,
     io::{self, Write},
     path::{Path, PathBuf},
     process::Command,
 };
 use supports_color::{self, Stream as ColorStream};
-use toml_edit::{DocumentMut, Item};
 
+mod checks;
+mod commands;
+mod config;
+mod jobs;
 mod readme;
 mod utils;
 
 // Embed schema for zero-execution discovery by Styx tooling
 styx_embed::embed_outdir_file!("schema.styx");
 
-use captain_config::CaptainConfig;
+use checks::{check_edition_2024, check_external_path_deps};
+pub use commands::debug_packages;
+use commands::{run_init, run_pre_push, show_and_apply_jobs};
+use config::load_captain_config;
+use jobs::{
+    Job, enqueue_arborium_jobs, enqueue_cargo_lock_jobs, enqueue_readme_jobs, enqueue_rustfmt_jobs,
+};
 use utils::TaskProgress;
 
 fn terminal_supports_color(stream: ColorStream) -> bool {
@@ -57,303 +63,8 @@ fn is_gitignored(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-#[derive(Debug, Clone)]
-struct Job {
-    path: PathBuf,
-    old_content: Option<Vec<u8>>,
-    new_content: Vec<u8>,
-    #[cfg(unix)]
-    executable: bool,
-}
-
-impl Job {
-    fn is_noop(&self) -> bool {
-        match &self.old_content {
-            Some(old) => {
-                if &self.new_content != old {
-                    return false;
-                }
-                #[cfg(unix)]
-                {
-                    // Check if executable bit would change
-                    let current_executable = self
-                        .path
-                        .metadata()
-                        .map(|m| m.permissions().mode() & 0o111 != 0)
-                        .unwrap_or(false);
-                    current_executable == self.executable
-                }
-                #[cfg(not(unix))]
-                {
-                    true
-                }
-            }
-            None => {
-                #[cfg(unix)]
-                {
-                    self.new_content.is_empty() && !self.executable
-                }
-                #[cfg(not(unix))]
-                {
-                    self.new_content.is_empty()
-                }
-            }
-        }
-    }
-
-    /// Applies the job by writing out the new_content to path and staging the file.
-    fn apply(&self) -> std::io::Result<()> {
-        use std::fs;
-
-        // Create parent directories if they don't exist
-        if let Some(parent) = self.path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
-        fs::write(&self.path, &self.new_content)?;
-
-        // Set executable bit if needed
-        #[cfg(unix)]
-        if self.executable {
-            let mut perms = fs::metadata(&self.path)?.permissions();
-            perms.set_mode(perms.mode() | 0o111);
-            fs::set_permissions(&self.path, perms)?;
-        }
-
-        // Now stage it, best effort
-        let _ = command_with_color("git")
-            .arg("add")
-            .arg(&self.path)
-            .status();
-        Ok(())
-    }
-}
-
-/// Check that all workspace crates use edition 2024. Bails with an error if not.
-fn check_edition_2024(metadata: &cargo_metadata::Metadata) {
-    use std::collections::HashSet;
-
-    let mut errors: Vec<String> = Vec::new();
-
-    // Check workspace.package.edition in root Cargo.toml (if it exists)
-    let workspace_root = &metadata.workspace_root;
-    let root_cargo_toml = workspace_root.join("Cargo.toml");
-    if root_cargo_toml.as_std_path().exists()
-        && let Ok(content) = fs::read_to_string(root_cargo_toml.as_std_path())
-        && let Ok(doc) = content.parse::<DocumentMut>()
-        && let Some(workspace) = doc.get("workspace").and_then(Item::as_table)
-        && let Some(package) = workspace.get("package").and_then(Item::as_table)
-        && let Some(edition) = package.get("edition").and_then(Item::as_str)
-        && edition != "2024"
-    {
-        errors.push(format!(
-            "{}: [workspace.package].edition = {:?} (expected \"2024\")",
-            root_cargo_toml, edition
-        ));
-    }
-
-    // Get workspace members
-    let workspace_member_ids: HashSet<_> = metadata
-        .workspace_members
-        .iter()
-        .map(|id| &id.repr)
-        .collect();
-
-    // Check each workspace crate's edition
-    for package in &metadata.packages {
-        if !workspace_member_ids.contains(&package.id.repr) {
-            continue;
-        }
-
-        let edition = &package.edition;
-        if edition.as_str() != "2024" {
-            errors.push(format!(
-                "{}: edition = \"{}\" (expected \"2024\")",
-                package.manifest_path,
-                edition.as_str()
-            ));
-        }
-    }
-
-    if !errors.is_empty() {
-        error!(
-            "{}",
-            "You have been deemed OUTDATED - edition 2024 now or bust".red()
-        );
-        error!("");
-        for err in &errors {
-            error!("  {} {}", "fix:".yellow(), err);
-        }
-        error!("");
-        error!("Set edition = \"2024\" in the above location(s) to proceed.");
-        std::process::exit(1);
-    }
-}
-
-/// Check for path dependencies that point outside the workspace.
-/// These are typically local development overrides that should not be committed.
-/// Bails with an error if any are found.
-fn check_external_path_deps(metadata: &cargo_metadata::Metadata) {
-    let workspace_root = &metadata.workspace_root;
-
-    let external_deps: Vec<_> = metadata
-        .packages
-        .iter()
-        .filter(|pkg| {
-            // source == None means it's a path dependency (not from crates.io or git)
-            pkg.source.is_none()
-        })
-        .filter(|pkg| {
-            // Check if manifest_path is outside workspace_root
-            !pkg.manifest_path.starts_with(workspace_root)
-        })
-        .collect();
-
-    if external_deps.is_empty() {
-        return;
-    }
-
-    error!("{}", "External path dependencies detected!".red().bold());
-    error!("");
-    error!(
-        "The following path dependencies point outside the workspace root ({}):",
-        workspace_root
-    );
-    error!("");
-    for pkg in &external_deps {
-        error!(
-            "  {} {} → {}",
-            "✗".red(),
-            pkg.name.as_str().yellow(),
-            pkg.manifest_path.parent().unwrap_or(&pkg.manifest_path)
-        );
-    }
-    error!("");
-    error!("These are typically local development overrides (e.g., in [patch] sections)");
-    error!("that should not be committed. They will break builds for other developers.");
-    error!("");
-    error!("To fix: comment out or remove the path dependencies before committing.");
-    std::process::exit(1);
-}
-
-enum ConfigFormat {
-    Styx,
-    Yaml,
-}
-
-/// Strip @schema directive from config content.
-/// The @schema directive is metadata for editors/LSPs, not actual config data.
-fn strip_schema_directive(content: &str) -> String {
-    content
-        .lines()
-        .filter(|line| !line.trim_start().starts_with("@schema"))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn load_captain_config() -> CaptainConfig {
-    let captain_dir = std::env::current_dir().unwrap().join(".config/captain");
-    let styx_path = captain_dir.join("config.styx");
-    let yaml_path = captain_dir.join("config.yaml");
-
-    // Check for old KDL config and error out
-    let old_kdl_path = captain_dir.join("config.kdl");
-    if old_kdl_path.exists() {
-        error!(
-            "Found old KDL config file at {}\n\
-             Captain now uses Styx configuration.\n\
-             Please migrate your config.kdl to config.styx and remove the .kdl file.\n\
-             See the README for the Styx syntax.",
-            old_kdl_path.display()
-        );
-        std::process::exit(1);
-    }
-
-    // Check for config.yml (we standardize on .yaml for legacy, .styx for new)
-    let yml_path = captain_dir.join("config.yml");
-    if yml_path.exists() {
-        error!(
-            "Found config.yml at {}\n\
-             Captain uses config.styx (or config.yaml for legacy).\n\
-             Please rename config.yml to config.styx.",
-            yml_path.display()
-        );
-        std::process::exit(1);
-    }
-
-    // Error if both .styx and .yaml exist
-    if styx_path.exists() && yaml_path.exists() {
-        error!(
-            "Found both config.styx and config.yaml in {}\n\
-             Please remove config.yaml and keep only config.styx.",
-            captain_dir.display()
-        );
-        std::process::exit(1);
-    }
-
-    // Determine which config file to use
-    let (config_path, format) = if styx_path.exists() {
-        (styx_path, ConfigFormat::Styx)
-    } else if yaml_path.exists() {
-        warn!(
-            "Using deprecated config.yaml at {}\n\
-             Please migrate to config.styx. The YAML format will be removed in a future version.",
-            yaml_path.display()
-        );
-        (yaml_path, ConfigFormat::Yaml)
-    } else {
-        debug!("No config file at {}, using defaults", styx_path.display());
-        return CaptainConfig::default();
-    };
-
-    let content = match fs::read_to_string(&config_path) {
-        Ok(c) => c,
-        Err(e) => {
-            error!("Failed to read config file {}: {e}", config_path.display());
-            std::process::exit(1);
-        }
-    };
-
-    // Handle empty file as defaults
-    if content.trim().is_empty() {
-        return CaptainConfig::default();
-    }
-
-    // Strip @schema directive (metadata for editors, not data)
-    let content = strip_schema_directive(&content);
-
-    match format {
-        ConfigFormat::Styx => match facet_styx::from_str(&content) {
-            Ok(config) => config,
-            Err(e) => {
-                error!("Failed to parse {}:\n{e}", config_path.display());
-                std::process::exit(1);
-            }
-        },
-        ConfigFormat::Yaml => match facet_yaml::from_str(&content) {
-            Ok(config) => config,
-            Err(e) => {
-                error!("Failed to parse {}:\n{e}", config_path.display());
-                std::process::exit(1);
-            }
-        },
-    }
-}
-
 fn main() {
     setup_logger();
-
-    miette::set_hook(Box::new(|_| {
-        Box::new(
-            miette::MietteHandlerOpts::new()
-                .terminal_links(true)
-                .unicode(true)
-                .context_lines(3)
-                .tab_width(4)
-                .build(),
-        )
-    }))
-    .expect("Failed to set miette hook");
 
     // Accept allowed log levels: trace, debug, error, warn, info
     log::set_max_level(LevelFilter::Info);
@@ -435,13 +146,19 @@ fn main() {
     };
 
     // Check edition 2024 requirement (bails if not met)
-    if config.pre_commit.edition_2024 {
-        check_edition_2024(&metadata);
+    if config.pre_commit.edition_2024
+        && let Err(e) = check_edition_2024(&metadata)
+    {
+        eprintln!("{}\n{}", e.summary, e.details);
+        std::process::exit(1);
     }
 
     // Check for external path dependencies (bails if found)
-    if config.pre_commit.external_path_deps {
-        check_external_path_deps(&metadata);
+    if config.pre_commit.external_path_deps
+        && let Err(e) = check_external_path_deps(&metadata)
+    {
+        eprintln!("{}\n{}", e.summary, e.details);
+        std::process::exit(1);
     }
 
     // Use a channel to collect jobs from all tasks.
@@ -533,7 +250,7 @@ fn main() {
 }
 
 #[derive(Debug, Clone)]
-struct StagedFiles {
+pub struct StagedFiles {
     /// Files that are staged (in the index) and not dirty (working tree matches index).
     clean: Vec<PathBuf>,
 }
@@ -625,7 +342,7 @@ fn setup_logger() {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use captain_config::CaptainConfig;
 
     fn parse_config(yaml: &str) -> CaptainConfig {
         facet_yaml::from_str(yaml).unwrap()

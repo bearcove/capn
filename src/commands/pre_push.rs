@@ -1,5 +1,20 @@
 //! Pre-push hook implementation.
 
+use crate::config::load_captain_config;
+use crate::utils::{TaskProgress, dir_size, format_size, run_command_with_spinner};
+use crate::{command_with_color, maybe_strip_bytes};
+use log::{error, warn};
+use owo_colors::OwoColorize;
+use std::process::{Command, Stdio};
+use std::sync::mpsc;
+use std::time::Duration;
+use std::{
+    fs, io,
+    io::Write,
+    path::{Path, PathBuf},
+};
+use supports_color::Stream as ColorStream;
+
 // Move from main.rs:
 // - run_pre_push (lines 1163-1925)
 // - get_shared_target_dir (lines 1160-1162)
@@ -18,7 +33,7 @@
 // - exit_with_command_error (lines 1042-1056)
 // - should_skip_doc_tests (lines 1058-1066)
 
-fn run_pre_push() {
+pub fn run_pre_push() {
     use std::collections::{BTreeSet, HashSet};
 
     let mut config = load_captain_config();
@@ -817,85 +832,6 @@ fn run_pre_push() {
 /// Get the shared target directory for pre-push checks (~/.captain/target)
 fn get_shared_target_dir() -> Option<PathBuf> {
     dirs::home_dir().map(|home| home.join(".captain").join("target"))
-}
-
-fn debug_packages() {
-    use std::collections::HashSet;
-
-    println!("{}", "Loading workspace metadata...".cyan().bold());
-
-    let metadata = match cargo_metadata::MetadataCommand::new().exec() {
-        Ok(m) => m,
-        Err(e) => {
-            let err_str = e.to_string();
-            // No Cargo.toml in this directory - not a Rust project
-            if err_str.contains("could not find") {
-                println!("{}", "No Cargo.toml found, nothing to do".yellow());
-                std::process::exit(0);
-            }
-            // Check if this is an empty virtual workspace (no members)
-            if err_str.contains("virtual manifest")
-                || err_str.contains("no members")
-                || err_str.contains("workspace has no members")
-            {
-                println!(
-                    "{}",
-                    "No workspace members found (empty virtual workspace)".yellow()
-                );
-                std::process::exit(0);
-            }
-            error!("Failed to get workspace metadata: {}", e);
-            std::process::exit(1);
-        }
-    };
-
-    // If this is a virtual workspace with no members, show that info
-    if metadata.workspace_members.is_empty() {
-        println!(
-            "{}",
-            "No workspace members found (empty virtual workspace)".yellow()
-        );
-        std::process::exit(0);
-    }
-
-    println!("{}", "\n📦 Workspace Members:".cyan().bold());
-    for member_id in &metadata.workspace_members {
-        if let Some(package) = metadata.packages.iter().find(|p| &p.id == member_id) {
-            println!(
-                "  ✓ {} ({})",
-                package.name,
-                package.manifest_path.parent().unwrap()
-            );
-        }
-    }
-
-    // Get the set of excluded crate names (those that are packages but not workspace members)
-    let workspace_member_ids: HashSet<_> = metadata
-        .workspace_members
-        .iter()
-        .map(|id| &id.repr)
-        .collect();
-
-    let excluded: Vec<_> = metadata
-        .packages
-        .iter()
-        .filter(|pkg| !workspace_member_ids.contains(&pkg.id.repr))
-        .collect();
-
-    if !excluded.is_empty() {
-        println!("{}", "\n🚫 Excluded Packages:".yellow().bold());
-        for package in excluded {
-            println!(
-                "  ✗ {} ({})",
-                package.name,
-                package.manifest_path.parent().unwrap()
-            );
-        }
-    } else {
-        println!("{}", "\n🚫 Excluded Packages: None".yellow().bold());
-    }
-
-    println!("\n✅ Total packages: {}", metadata.packages.len());
 }
 
 fn shell_escape(part: &str) -> String {

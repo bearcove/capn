@@ -1,8 +1,6 @@
 //! Configuration loading from .config/captain/config.styx
 
 use captain_config::CaptainConfig;
-use log::{debug, error, warn};
-use std::fs;
 
 // Move from main.rs:
 // - ConfigFormat enum (lines 333-336)

@@ -1,15 +1,18 @@
 //! Pre-commit hook implementation.
 
+use crate::jobs::Job;
+use owo_colors::OwoColorize;
 use std::path::PathBuf;
 
-// Move from main.rs:
-// - The pre-commit logic currently in main() (lines 2430-2570)
+// TODO: Move the pre-commit logic from main() here.
+// It needs: collect_staged_files, load_captain_config, TaskProgress,
+// check_edition_2024, check_external_path_deps, enqueue_* jobs, is_gitignored
 
 pub fn run_pre_commit(_template_dir: Option<PathBuf>) {
     todo!("move pre-commit logic here from main()")
 }
 
-fn show_and_apply_jobs(jobs: &mut [Job]) {
+pub fn show_and_apply_jobs(jobs: &mut [Job]) {
     jobs.sort_by_key(|job| job.path.clone());
 
     if jobs.is_empty() {
