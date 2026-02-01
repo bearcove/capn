@@ -20,7 +20,7 @@ mod utils;
 styx_embed::embed_outdir_file!("schema.styx");
 
 pub use commands::{StagedFiles, debug_packages};
-use commands::{run_init, run_pre_commit, run_pre_push};
+use commands::{run_clean, run_init, run_pre_commit, run_pre_push};
 
 /// Git pre-commit and pre-push hooks for Rust projects.
 #[derive(Facet, Debug)]
@@ -54,6 +54,8 @@ enum Commands {
     Init,
     /// Debug package detection
     DebugPackages,
+    /// Clean captain's shared target directory
+    Clean,
 }
 
 fn terminal_supports_color(stream: ColorStream) -> bool {
@@ -115,6 +117,9 @@ fn main() {
         }
         Some(Commands::DebugPackages) => {
             debug_packages();
+        }
+        Some(Commands::Clean) => {
+            run_clean();
         }
         Some(Commands::PreCommit { template_dir }) => {
             run_pre_commit(args.config, template_dir);

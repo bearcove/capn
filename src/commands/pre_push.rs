@@ -152,10 +152,18 @@ pub fn run_pre_push(config: CaptainConfig) {
     println!();
 
     // Print target directory size if available
-    if let Some(size) = results.get::<u64>("target size") {
+    if let Some(info) = results.get::<TargetSizeInfo>("target size") {
+        let size_str = format_size(info.size);
+        let fifty_gb = 50 * 1024 * 1024 * 1024;
+        let size_colored = if info.size > fifty_gb {
+            size_str.red().bold().to_string()
+        } else {
+            size_str.dimmed().to_string()
+        };
         println!(
-            "{}",
-            format!("📦 Target directory: {}", format_size(*size)).dimmed()
+            "📦 {} {}",
+            info.path.display().to_string().dimmed(),
+            size_colored
         );
     }
 
@@ -168,14 +176,24 @@ pub fn run_pre_push(config: CaptainConfig) {
 // Task functions
 // ============================================================================
 
-fn target_size_task(_handle: &TaskHandle) -> TaskResult<u64> {
+/// Result of target size calculation
+#[derive(Clone)]
+pub struct TargetSizeInfo {
+    pub path: PathBuf,
+    pub size: u64,
+}
+
+fn target_size_task(_handle: &TaskHandle) -> TaskResult<TargetSizeInfo> {
     // Use the shared target directory if set, otherwise default
     let target_dir = std::env::var("CARGO_TARGET_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("target"));
 
     let size = dir_size(&target_dir);
-    TaskResult::success(size)
+    TaskResult::success(TargetSizeInfo {
+        path: target_dir,
+        size,
+    })
 }
 
 fn load_metadata_task(_handle: &TaskHandle) -> TaskResult<Metadata> {
