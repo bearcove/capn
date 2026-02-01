@@ -292,7 +292,7 @@ fn compute_affected_crates_task(
     git: Arc<GitInfo>,
 ) -> TaskResult<AffectedCrates> {
     if git.changed_files.is_empty() {
-        return TaskResult::failed("no changes", "No changes detected");
+        return TaskResult::skipped("no changes");
     }
 
     let workspace_root = metadata.workspace_root.clone().into_std_path_buf();
@@ -351,10 +351,7 @@ fn compute_affected_crates_task(
     crate_to_files.retain(|crate_name, _| !excluded_crates.contains(crate_name));
 
     if crate_to_files.is_empty() {
-        return TaskResult::failed(
-            "no crates affected",
-            "No publishable crates affected by changes",
-        );
+        return TaskResult::skipped("no crates affected");
     }
 
     let crates: BTreeSet<_> = crate_to_files.keys().cloned().collect();
