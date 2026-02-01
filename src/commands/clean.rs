@@ -1,6 +1,6 @@
 //! Clean command to remove captain's shared target directory.
 
-use crate::utils::{dir_size, format_size};
+use crate::utils::{TaskProgress, dir_size, format_size};
 use owo_colors::OwoColorize;
 use std::fs;
 use std::io::{self, Write};
@@ -22,8 +22,12 @@ pub fn run_clean() {
         return;
     }
 
+    // Show spinner while computing size
+    let progress = TaskProgress::new();
+    let spinner = progress.add_task("calculating");
     let size = dir_size(&target_dir);
     let size_str = format_size(size);
+    spinner.clear();
 
     println!("Captain's shared target directory:");
     println!(

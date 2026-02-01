@@ -69,6 +69,11 @@ impl TaskSpinner {
         self.bar
             .set_message(format!("{:<14} {}", self.name, display_msg.dimmed()));
     }
+
+    /// Clear the spinner without showing any result
+    pub fn clear(&self) {
+        self.bar.finish_and_clear();
+    }
 }
 
 /// Manages multiple concurrent task spinners

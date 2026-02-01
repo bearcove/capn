@@ -155,16 +155,21 @@ pub fn run_pre_push(config: CaptainConfig) {
     if let Some(info) = results.get::<TargetSizeInfo>("target size") {
         let size_str = format_size(info.size);
         let fifty_gb = 50 * 1024 * 1024 * 1024;
-        let size_colored = if info.size > fifty_gb {
+        let is_large = info.size > fifty_gb;
+        let size_colored = if is_large {
             size_str.red().bold().to_string()
         } else {
             size_str.dimmed().to_string()
         };
-        println!(
+        print!(
             "📦 {} {}",
             info.path.display().to_string().dimmed(),
             size_colored
         );
+        if is_large {
+            print!(" {}", "(run 'captain clean' to remove)".dimmed());
+        }
+        println!();
     }
 
     println!("{} {}", "✅".green(), "All checks passed!".green().bold());
