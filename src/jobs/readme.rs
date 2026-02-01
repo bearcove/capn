@@ -7,12 +7,12 @@ use owo_colors::OwoColorize;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub fn enqueue_readme_jobs(
-    sender: std::sync::mpsc::Sender<Job>,
+pub fn collect_readme_jobs(
     template_dir: Option<&Path>,
     staged_files: &StagedFiles,
     metadata: &cargo_metadata::Metadata,
-) {
+) -> Vec<Job> {
+    let mut jobs = Vec::new();
     let workspace_dir = std::env::current_dir().unwrap();
 
     // Collect crate directories from workspace root and crates/ subdirectory
@@ -55,14 +55,17 @@ pub fn enqueue_readme_jobs(
     let custom_footer = find_template("readme-footer.md");
 
     // Helper function to process a README template
-    let process_readme_template = |template_path: &Path, output_dir: &Path, crate_name: &str| {
+    let process_readme_template = |template_path: &Path,
+                                   output_dir: &Path,
+                                   crate_name: &str|
+     -> Option<Job> {
         if !template_path.exists() {
             error!(
                 "🚫 {} Please add a README.md.in template here that describes what this crate is for:\n   {}",
                 "Missing template!".red().bold(),
                 template_path.display().yellow()
             );
-            return;
+            return None;
         }
 
         // Read the template file
@@ -70,7 +73,7 @@ pub fn enqueue_readme_jobs(
             Ok(s) => s,
             Err(e) => {
                 error!("Failed to read template {}: {e}", template_path.display());
-                return;
+                return None;
             }
         };
 
@@ -138,17 +141,13 @@ pub fn enqueue_readme_jobs(
 
         let old_content = fs::read(&readme_path).ok();
 
-        let job = Job {
+        Some(Job {
             path: readme_path,
             old_content,
             new_content: readme_content.into_bytes(),
             #[cfg(unix)]
             executable: false,
-        };
-
-        if let Err(e) = sender.send(job) {
-            error!("Failed to send job: {e}");
-        }
+        })
     };
 
     for crate_path in crate_dirs {
@@ -197,14 +196,16 @@ pub fn enqueue_readme_jobs(
             crate_path.join(template_name)
         };
 
-        process_readme_template(&template_path, &crate_path, &crate_name);
+        if let Some(job) = process_readme_template(&template_path, &crate_path, &crate_name) {
+            jobs.push(job);
+        }
     }
 
     // Also handle the workspace/top-level README, if there's a Cargo.toml
     let workspace_cargo_toml = workspace_dir.join("Cargo.toml");
     if !workspace_cargo_toml.exists() {
         // No top-level Cargo.toml, skip workspace README
-        return;
+        return jobs;
     }
 
     let workspace_template_path = workspace_dir.join(template_name);
@@ -226,7 +227,13 @@ pub fn enqueue_readme_jobs(
         }
     };
 
-    process_readme_template(&workspace_template_path, &workspace_dir, &workspace_name);
+    if let Some(job) =
+        process_readme_template(&workspace_template_path, &workspace_dir, &workspace_name)
+    {
+        jobs.push(job);
+    }
+
+    jobs
 }
 
 /// Get the workspace name from cargo metadata (the root package name or first default member)

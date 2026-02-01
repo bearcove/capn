@@ -10,10 +10,9 @@ use toml_edit::{Array, DocumentMut, Item, Table, Value};
 // Move from main.rs:
 // - ensure_docsrs_metadata (lines 187-222)
 
-pub fn enqueue_arborium_jobs(
-    sender: std::sync::mpsc::Sender<Job>,
-    metadata: &cargo_metadata::Metadata,
-) {
+pub fn collect_arborium_jobs(metadata: &cargo_metadata::Metadata) -> Vec<Job> {
+    let mut jobs = Vec::new();
+
     // Get workspace members
     let workspace_member_ids: HashSet<_> = metadata
         .workspace_members
@@ -46,14 +45,13 @@ pub fn enqueue_arborium_jobs(
 
             // Only create a job if the file doesn't exist or content differs
             if old_content.as_ref() != Some(&new_content) {
-                let job = Job {
+                jobs.push(Job {
                     path: header_path,
                     old_content,
                     new_content,
                     #[cfg(unix)]
                     executable: false,
-                };
-                let _ = sender.send(job);
+                });
             }
 
             // Also update Cargo.toml to add docsrs metadata if not present
@@ -61,10 +59,12 @@ pub fn enqueue_arborium_jobs(
             if cargo_toml_path.exists()
                 && let Some(job) = rewrite_cargo_toml(&cargo_toml_path, ensure_docsrs_metadata)
             {
-                let _ = sender.send(job);
+                jobs.push(job);
             }
         }
     }
+
+    jobs
 }
 
 fn rewrite_cargo_toml<F>(cargo_toml_path: &Path, mut transform: F) -> Option<Job>

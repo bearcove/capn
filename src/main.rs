@@ -15,6 +15,7 @@ mod checks;
 mod commands;
 mod jobs;
 mod readme;
+mod task;
 mod utils;
 
 // Embed schema for zero-execution discovery by Styx tooling

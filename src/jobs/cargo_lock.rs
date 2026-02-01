@@ -2,11 +2,10 @@
 
 use super::Job;
 use crate::command_with_color;
-use log::error;
 use std::fs;
 use std::path::Path;
 
-pub fn enqueue_cargo_lock_jobs(sender: std::sync::mpsc::Sender<Job>) {
+pub fn collect_cargo_lock_jobs() -> Vec<Job> {
     let lock_path = Path::new("Cargo.lock");
 
     // Check if Cargo.lock has unstaged changes
@@ -28,18 +27,16 @@ pub fn enqueue_cargo_lock_jobs(sender: std::sync::mpsc::Sender<Job>) {
                     .filter(|o| o.status.success())
                     .map(|o| o.stdout);
 
-                let job = Job {
+                return vec![Job {
                     path: lock_path.to_path_buf(),
                     old_content,
                     new_content: content,
                     #[cfg(unix)]
                     executable: false,
-                };
-
-                if let Err(e) = sender.send(job) {
-                    error!("Failed to send Cargo.lock job: {e}");
-                }
+                }];
             }
         }
     }
+
+    Vec::new()
 }

@@ -9,9 +9,11 @@ use std::io::Write;
 use std::process::Stdio;
 use supports_color::Stream as ColorStream;
 
-pub fn enqueue_rustfmt_jobs(sender: std::sync::mpsc::Sender<Job>, staged_files: &StagedFiles) {
+pub fn collect_rustfmt_jobs(staged_files: &StagedFiles) -> Vec<Job> {
     use log::trace;
     use std::time::Instant;
+
+    let mut jobs = Vec::new();
 
     for path in &staged_files.clean {
         // Only process .rs files
@@ -107,15 +109,14 @@ pub fn enqueue_rustfmt_jobs(sender: std::sync::mpsc::Sender<Job>, staged_files: 
         }
 
         let formatted = output.stdout;
-        let job = Job {
+        jobs.push(Job {
             path: path.clone(),
             old_content: Some(original),
             new_content: formatted,
             #[cfg(unix)]
             executable: false,
-        };
-        if let Err(e) = sender.send(job) {
-            error!("Failed to send rustfmt job for {}: {}", path.display(), e);
-        }
+        });
     }
+
+    jobs
 }

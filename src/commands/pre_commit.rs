@@ -6,13 +6,11 @@ use owo_colors::OwoColorize;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::mpsc;
+use std::sync::Arc;
 
 use crate::checks::{check_edition_2024, check_external_path_deps};
-use crate::jobs::{
-    Job, enqueue_arborium_jobs, enqueue_cargo_lock_jobs, enqueue_readme_jobs, enqueue_rustfmt_jobs,
-};
-use crate::utils::TaskProgress;
+use crate::jobs::Job;
+use crate::task::{TaskResult, TaskRunner};
 
 pub fn run_pre_commit(config: CaptainConfig, template_dir: Option<PathBuf>) {
     let staged_files = match collect_staged_files() {
@@ -26,116 +24,98 @@ pub fn run_pre_commit(config: CaptainConfig, template_dir: Option<PathBuf>) {
         }
     };
 
-    // Create progress tracker with spinners
-    let progress = TaskProgress::new();
     let start_time = std::time::Instant::now();
 
-    // Load cargo metadata once (used by multiple operations)
-    let metadata_spinner = progress.add_task("metadata");
-    let metadata_start = std::time::Instant::now();
-    let metadata = match cargo_metadata::MetadataCommand::new().exec() {
-        Ok(m) => {
-            metadata_spinner.succeed(metadata_start.elapsed().as_secs_f32());
-            m
+    // Create task runner
+    let mut runner = TaskRunner::new();
+
+    // Add metadata loading as a task that spawns other tasks
+    let config_clone = config.clone();
+    let staged_files = Arc::new(staged_files);
+    let template_dir = template_dir.map(Arc::new);
+
+    runner.add("metadata", move |handle| {
+        let metadata = match cargo_metadata::MetadataCommand::new().exec() {
+            Ok(m) => Arc::new(m),
+            Err(e) => {
+                debug!("Failed to load workspace metadata: {}", e);
+                return TaskResult::failed("failed to load", e.to_string());
+            }
+        };
+
+        // Spawn checks
+        if config_clone.pre_commit.edition_2024 {
+            let metadata = metadata.clone();
+            handle.spawn("edition-2024", move |_| {
+                match check_edition_2024(&metadata) {
+                    Ok(()) => TaskResult::success(),
+                    Err(e) => TaskResult::failed(e.summary, e.details),
+                }
+            });
         }
-        Err(e) => {
-            metadata_spinner.fail(metadata_start.elapsed().as_secs_f32());
-            debug!("Failed to load workspace metadata: {}", e);
-            std::process::exit(1);
+
+        if config_clone.pre_commit.external_path_deps {
+            let metadata = metadata.clone();
+            handle.spawn("external-deps", move |_| {
+                match check_external_path_deps(&metadata) {
+                    Ok(()) => TaskResult::success(),
+                    Err(e) => TaskResult::failed(e.summary, e.details),
+                }
+            });
         }
-    };
 
-    // Check edition 2024 requirement (bails if not met)
-    if config.pre_commit.edition_2024
-        && let Err(e) = check_edition_2024(&metadata)
-    {
-        eprintln!("{}\n{}", e.summary, e.details);
-        std::process::exit(1);
-    }
-
-    // Check for external path dependencies (bails if found)
-    if config.pre_commit.external_path_deps
-        && let Err(e) = check_external_path_deps(&metadata)
-    {
-        eprintln!("{}\n{}", e.summary, e.details);
-        std::process::exit(1);
-    }
-
-    // Use a channel to collect jobs from all tasks.
-    let (tx_job, rx_job) = mpsc::channel();
-
-    let mut handles = vec![];
-    let mut spinners = vec![];
-
-    if config.pre_commit.generate_readmes {
-        let spinner = progress.add_task("readmes");
-        spinners.push(("readmes", spinner, std::time::Instant::now()));
-        handles.push(std::thread::spawn({
-            let sender = tx_job.clone();
+        // Spawn jobs
+        if config_clone.pre_commit.generate_readmes {
+            let metadata = metadata.clone();
+            let staged_files = staged_files.clone();
             let template_dir = template_dir.clone();
-            let staged_files_clone = staged_files.clone();
-            let metadata_clone = metadata.clone();
-            move || {
-                enqueue_readme_jobs(
-                    sender,
-                    template_dir.as_deref(),
-                    &staged_files_clone,
-                    &metadata_clone,
+            handle.spawn("readmes", move |_handle| {
+                let jobs = crate::jobs::collect_readme_jobs(
+                    template_dir.as_deref().map(|p| p.as_path()),
+                    &staged_files,
+                    &metadata,
                 );
-            }
-        }));
+                TaskResult::success_with_jobs(jobs)
+            });
+        }
+
+        if config_clone.pre_commit.rustfmt {
+            let staged_files = staged_files.clone();
+            handle.spawn("rustfmt", move |_handle| {
+                let jobs = crate::jobs::collect_rustfmt_jobs(&staged_files);
+                TaskResult::success_with_jobs(jobs)
+            });
+        }
+
+        if config_clone.pre_commit.cargo_lock {
+            handle.spawn("cargo-lock", move |_handle| {
+                let jobs = crate::jobs::collect_cargo_lock_jobs();
+                TaskResult::success_with_jobs(jobs)
+            });
+        }
+
+        if config_clone.pre_commit.arborium {
+            let metadata = metadata.clone();
+            handle.spawn("arborium", move |_handle| {
+                let jobs = crate::jobs::collect_arborium_jobs(&metadata);
+                TaskResult::success_with_jobs(jobs)
+            });
+        }
+
+        TaskResult::success()
+    });
+
+    // Run all tasks
+    let results = runner.run();
+
+    // Check for failures
+    if results.has_failures() {
+        results.print_failures();
+        std::process::exit(1);
     }
 
-    if config.pre_commit.rustfmt {
-        let spinner = progress.add_task("rustfmt");
-        spinners.push(("rustfmt", spinner, std::time::Instant::now()));
-        handles.push(std::thread::spawn({
-            let sender = tx_job.clone();
-            move || {
-                enqueue_rustfmt_jobs(sender, &staged_files);
-            }
-        }));
-    }
-
-    if config.pre_commit.cargo_lock {
-        let spinner = progress.add_task("cargo-lock");
-        spinners.push(("cargo-lock", spinner, std::time::Instant::now()));
-        handles.push(std::thread::spawn({
-            let sender = tx_job.clone();
-            move || {
-                enqueue_cargo_lock_jobs(sender);
-            }
-        }));
-    }
-
-    if config.pre_commit.arborium {
-        let spinner = progress.add_task("arborium");
-        spinners.push(("arborium", spinner, std::time::Instant::now()));
-        handles.push(std::thread::spawn({
-            let sender = tx_job.clone();
-            let metadata_clone = metadata.clone();
-            move || {
-                enqueue_arborium_jobs(sender, &metadata_clone);
-            }
-        }));
-    }
-
-    drop(tx_job);
-
-    let mut jobs: Vec<Job> = Vec::new();
-    for job in rx_job {
-        jobs.push(job);
-    }
-
-    for handle in handles.drain(..) {
-        handle.join().unwrap();
-    }
-
-    // Mark all async spinners as complete
-    for (_name, spinner, task_start) in spinners {
-        spinner.succeed(task_start.elapsed().as_secs_f32());
-    }
-
+    // Collect and apply jobs
+    let mut jobs = results.collect_jobs();
     jobs.retain(|job| !job.is_noop());
     jobs.retain(|job| !is_gitignored(&job.path));
 
