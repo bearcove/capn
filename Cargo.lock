@@ -130,7 +130,6 @@ dependencies = [
  "indicatif",
  "owo-colors",
  "rayon",
- "serde_json",
  "strip-ansi-escapes",
  "styx-embed",
  "supports-color 3.0.2",

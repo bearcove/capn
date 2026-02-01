@@ -240,63 +240,36 @@ pub fn collect_readme_jobs(
 pub fn workspace_name_from_metadata_object(
     metadata: &cargo_metadata::Metadata,
 ) -> Result<String, String> {
-    // Convert metadata to JSON for easier traversal
-    let metadata_json =
-        serde_json::to_value(metadata).map_err(|e| format!("Failed to serialize metadata: {e}"))?;
-
-    if let Some(root_id) = metadata_json
-        .get("resolve")
-        .and_then(|resolve| resolve.get("root"))
-        .and_then(|root| root.as_str())
-        && let Some(name) = package_name_by_id(&metadata_json, root_id)
+    // Try resolve root first
+    if let Some(resolve) = &metadata.resolve
+        && let Some(root_id) = &resolve.root
+        && let Some(pkg) = metadata.packages.iter().find(|p| &p.id == root_id)
     {
-        return Ok(name.to_string());
+        return Ok(pkg.name.to_string());
     }
 
-    if let Some(default_members) = metadata_json
-        .get("workspace_default_members")
-        .and_then(|members| members.as_array())
-    {
-        for member in default_members {
-            if let Some(member_id) = member.as_str()
-                && let Some(name) = package_name_by_id(&metadata_json, member_id)
-            {
-                return Ok(name.to_string());
+    // Try workspace default members
+    if metadata.workspace_default_members.is_available() {
+        for member_id in metadata.workspace_default_members.iter() {
+            if let Some(pkg) = metadata.packages.iter().find(|p| &p.id == member_id) {
+                return Ok(pkg.name.to_string());
             }
         }
     }
 
+    // Fall back to finding the package whose manifest matches workspace root
     let canonical_manifest = fs::canonicalize(metadata.workspace_root.join("Cargo.toml"))
         .map_err(|e| format!("Failed to canonicalize workspace manifest: {e}"))?;
 
-    if let Some(packages) = metadata_json
-        .get("packages")
-        .and_then(|packages| packages.as_array())
-    {
-        for pkg in packages {
-            if let (Some(name), Some(manifest_path_str)) = (
-                pkg.get("name").and_then(|n| n.as_str()),
-                pkg.get("manifest_path").and_then(|path| path.as_str()),
-            ) && let Ok(pkg_manifest_path) = fs::canonicalize(manifest_path_str)
-                && pkg_manifest_path == canonical_manifest
-            {
-                return Ok(name.to_string());
-            }
+    for pkg in &metadata.packages {
+        if let Ok(pkg_manifest_path) = fs::canonicalize(pkg.manifest_path.as_std_path())
+            && pkg_manifest_path == canonical_manifest
+        {
+            return Ok(pkg.name.to_string());
         }
     }
 
     Err("Unable to match workspace manifest to any package".to_string())
-}
-
-fn package_name_by_id<'a>(metadata: &'a serde_json::Value, package_id: &str) -> Option<&'a str> {
-    let packages = metadata.get("packages")?.as_array()?;
-    for pkg in packages {
-        let id = pkg.get("id")?.as_str()?;
-        if id == package_id {
-            return pkg.get("name")?.as_str();
-        }
-    }
-    None
 }
 
 /// Check if a crate has `generate-readmes = false` in its `[package.metadata.captain]`
