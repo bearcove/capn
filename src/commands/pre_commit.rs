@@ -174,14 +174,14 @@ fn collect_staged_files() -> io::Result<StagedFiles> {
     for line in stdout.lines() {
         // E.g. "M  src/main.rs", "A  foo.rs", "AM foo/bar.rs"
         if line.len() < 3 {
-            log::trace!("Skipping short line: {:?}", line.dimmed());
+            tracing::trace!("Skipping short line: {:?}", line.dimmed());
             continue;
         }
         let x = line.chars().next().unwrap();
         let y = line.chars().nth(1).unwrap();
         let path = line[3..].to_string();
 
-        log::trace!(
+        tracing::trace!(
             "x: {:?}, y: {:?}, path: {:?}",
             x.magenta(),
             y.cyan(),
@@ -193,7 +193,7 @@ fn collect_staged_files() -> io::Result<StagedFiles> {
         if x != ' ' && x != '?' && x != 'D' && y == ' ' {
             // Convert relative path to absolute for consistent comparison
             let abs_path = cwd.join(&path);
-            log::debug!(
+            tracing::debug!(
                 "{} {}",
                 "-> clean (staged, not dirty):".green().bold(),
                 abs_path.display().to_string().blue()

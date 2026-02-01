@@ -1,11 +1,11 @@
 //! Captain initialization command.
 
 use crate::jobs::workspace_name_from_metadata_object;
-use log::error;
 use owo_colors::OwoColorize;
 use std::fs;
 use std::io::{self, Write};
 use std::process::Command;
+use tracing::error;
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;

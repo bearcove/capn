@@ -2,14 +2,12 @@ use captain_config::CaptainConfig;
 use facet::Facet;
 use facet_styx::StyxFormat;
 use figue::{self as args, Driver};
-use log::{Level, LevelFilter, Log, Metadata, Record};
-use owo_colors::{OwoColorize, Style};
 use std::borrow::Cow;
 use std::ffi::OsStr;
-use std::io::Write;
 use std::path::PathBuf;
 use std::process::Command;
 use supports_color::{self, Stream as ColorStream};
+use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 mod checks;
 mod commands;
@@ -82,25 +80,13 @@ fn command_with_color<S: AsRef<OsStr>>(program: S) -> Command {
 }
 
 fn main() {
-    setup_logger();
-
-    // Accept allowed log levels: trace, debug, error, warn, info
-    log::set_max_level(LevelFilter::Info);
-    if let Ok(log_level) = std::env::var("RUST_LOG") {
-        let allowed = ["trace", "debug", "error", "warn", "info"];
-        let log_level_lc = log_level.to_lowercase();
-        if allowed.contains(&log_level_lc.as_str()) {
-            let level = match log_level_lc.as_str() {
-                "trace" => LevelFilter::Trace,
-                "debug" => LevelFilter::Debug,
-                "info" => LevelFilter::Info,
-                "warn" => LevelFilter::Warn,
-                "error" => LevelFilter::Error,
-                _ => LevelFilter::Info,
-            };
-            log::set_max_level(level);
-        }
-    }
+    // Set up tracing with env filter (RUST_LOG)
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("captain=info"));
+    tracing_subscriber::registry()
+        .with(fmt::layer().with_writer(std::io::stderr))
+        .with(filter)
+        .init();
 
     // Parse config from CLI args and config file using figue
     let figue_config = args::builder::<Args>()
@@ -137,44 +123,4 @@ fn main() {
             run_pre_commit(args.config, None);
         }
     }
-}
-
-struct SimpleLogger;
-
-impl Log for SimpleLogger {
-    fn enabled(&self, _metadata: &Metadata) -> bool {
-        true
-    }
-
-    fn log(&self, record: &Record) {
-        // Create style based on log level
-        let level_style = match record.level() {
-            Level::Error => Style::new().fg_rgb::<243, 139, 168>(), // Catppuccin red (Maroon)
-            Level::Warn => Style::new().fg_rgb::<249, 226, 175>(),  // Catppuccin yellow (Peach)
-            Level::Info => Style::new().fg_rgb::<166, 227, 161>(),  // Catppuccin green (Green)
-            Level::Debug => Style::new().fg_rgb::<137, 180, 250>(), // Catppuccin blue (Blue)
-            Level::Trace => Style::new().fg_rgb::<148, 226, 213>(), // Catppuccin teal (Teal)
-        };
-
-        // Convert level to styled display
-        eprintln!(
-            "{} - {}: {}",
-            record.level().style(level_style),
-            record
-                .target()
-                .style(Style::new().fg_rgb::<137, 180, 250>()), // Blue for the target
-            record.args()
-        );
-    }
-
-    fn flush(&self) {
-        let _ = std::io::stderr().flush();
-    }
-}
-
-/// Set up a simple logger.
-fn setup_logger() {
-    let logger = Box::new(SimpleLogger);
-    log::set_boxed_logger(logger).unwrap();
-    log::set_max_level(LevelFilter::Trace);
 }

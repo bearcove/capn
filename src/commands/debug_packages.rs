@@ -1,8 +1,8 @@
 //! Debug command to show workspace package info.
 
-use log::error;
 use owo_colors::OwoColorize;
 use std::collections::HashSet;
+use tracing::error;
 
 pub fn debug_packages() {
     println!("{}", "Loading workspace metadata...".cyan().bold());

@@ -1,11 +1,11 @@
 //! Arborium header and docs.rs metadata jobs.
 
 use super::Job;
-use log::error;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use toml_edit::{Array, DocumentMut, Item, Table, Value};
+use tracing::error;
 
 // Move from main.rs:
 // - ensure_docsrs_metadata (lines 187-222)

@@ -2,16 +2,16 @@
 
 use super::Job;
 use crate::{StagedFiles, command_with_color, maybe_strip_bytes};
-use log::{debug, error};
 use owo_colors::OwoColorize;
 use std::fs;
 use std::io::Write;
 use std::process::Stdio;
 use supports_color::Stream as ColorStream;
+use tracing::{debug, error};
 
 pub fn collect_rustfmt_jobs(staged_files: &StagedFiles) -> Vec<Job> {
-    use log::trace;
     use std::time::Instant;
+    use tracing::trace;
 
     let mut jobs = Vec::new();
 

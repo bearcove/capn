@@ -2,10 +2,10 @@
 
 use super::Job;
 use crate::{StagedFiles, command_with_color, readme};
-use log::{error, warn};
 use owo_colors::OwoColorize;
 use std::fs;
 use std::path::{Path, PathBuf};
+use tracing::{error, warn};
 
 pub fn collect_readme_jobs(
     template_dir: Option<&Path>,
