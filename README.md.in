@@ -1,22 +1,31 @@
-**captain** is a comprehensive development automation tool for Rust workspaces.
-It integrates seamlessly as a pre-commit hook and handles repetitive project setup,
-code generation, and CI/CD configuration automatically.
+**captain** is a development automation tool for Rust workspaces.
+It runs as pre-commit and pre-push hooks, handling code formatting, README generation,
+and comprehensive validation before you push.
 
 > This project was originally forked from [facet-dev](https://github.com/facet-rs/facet-dev).
 
 ## Features
 
-captain automates the following tasks:
+### Pre-commit (runs on every commit)
 
-- **README Generation**: Generates `README.md` files from `README.md.in` templates with customizable headers and footers
-- **Code Formatting**: Runs `cargo fmt` to enforce consistent code style
-- **Pre-push Verification**: Validates code before pushing (via `captain pre-push`):
-  - Runs clippy for linting
-  - Executes tests
-  - Checks documentation compilation
-  - Verifies all crates in workspace
-- **MSRV Consistency**: Ensures all crates have the same Minimum Supported Rust Version
-- **Rust Documentation**: Auto-generates rustdoc configuration
+- **README Generation**: Generates `README.md` from `README.md.in` templates with customizable headers/footers
+- **Code Formatting**: Formats staged Rust files with `rustfmt` (edition 2024)
+- **Cargo.lock Staging**: Automatically stages lockfile changes
+- **Arborium Setup**: Configures [arborium](https://github.com/bearcove/arborium) syntax highlighting for rustdoc
+- **Edition 2024 Enforcement**: Ensures all crates use Rust edition 2024
+- **External Path Deps Check**: Catches path dependencies pointing outside the workspace
+
+### Pre-push (runs before pushing)
+
+- **Clippy**: Runs `cargo clippy` with warnings as errors
+- **Tests**: Runs tests via `cargo nextest` (only affected crates)
+- **Doc Tests**: Runs documentation tests (disabled by default)
+- **Documentation**: Builds docs with `cargo doc -D warnings`
+- **Unused Dependencies**: Checks for unused deps with `cargo-shear`
+- **Target Size**: Reports target directory size at the end
+
+All checks run in parallel with live progress spinners. If any check fails, remaining
+tasks are cancelled immediately.
 
 ## Installation
 
@@ -46,9 +55,7 @@ cargo install captain
 cargo install --git https://github.com/bearcove/captain
 ```
 
-## Usage
-
-### Quick Start
+## Quick Start
 
 Initialize captain in your project:
 
@@ -56,195 +63,149 @@ Initialize captain in your project:
 captain init
 ```
 
-This interactively creates:
-- `hooks/` directory with pre-commit and pre-push hooks
+This creates:
+- `hooks/pre-commit` and `hooks/pre-push` scripts
 - `hooks/install.sh` to install the hooks
-- `conductor.json` for [Conductor](https://www.conductor.build/) setup (optional)
+- `conductor.json` for [Conductor](https://www.conductor.build/) integration
 - `.config/captain/config.styx` configuration file
-- `.config/captain/readme-templates/` with empty header/footer templates
-- `README.md.in` template (if not present)
+- `.config/captain/readme-templates/` for header/footer templates
+- `README.md.in` template
 
-### Basic Generation
-
-Run captain in your workspace root to generate/update all project files:
-
-```bash
-captain
-```
-
-This will:
-1. Generate `README.md` for the workspace and all crates
-2. Format code with `cargo fmt`
-3. Stage all changes with `git add`
-
-### Pre-push Checks
-
-Before pushing to a remote repository, run:
-
-```bash
-captain pre-push
-```
-
-This performs comprehensive checks:
-- Runs `cargo clippy` on all crates
-- Executes `cargo test`
-- Validates documentation with `cargo doc`
-- Ensures MSRV consistency
-
-### Custom Template Directory
-
-Specify a custom directory for looking up `README.md.in` templates:
-
-```bash
-captain --template-dir /path/to/templates
-```
-
-This searches for `{crate_name}.md.in` files in the specified directory, falling back
-to the crate's own template if not found.
-
-### Debugging
-
-View workspace metadata and package information:
-
-```bash
-captain debug-packages
-```
-
-## README Template Configuration
-
-### Standard Template Format
-
-Each crate should have a `README.md.in` file in its directory. The generated `README.md`
-combines three parts:
-
-1. **Header** (with badges and links)
-2. **Main Content** (from `README.md.in`)
-3. **Footer** (with license information)
-
-### Header and Footer Templates
-
-Captain looks for header and footer templates in `.config/captain/readme-templates/`:
-
-```bash
-.config/captain/readme-templates/
-├── readme-header.md
-└── readme-footer.md
-```
-
-These are prepended/appended to every generated `README.md`. If not present, no header or footer is added.
-
-**Header Template Example** (`readme-header.md`):
-
-```markdown
-# {CRATE}
-
-[![CI](https://github.com/your-org/{CRATE}/actions/workflows/ci.yml/badge.svg)](https://github.com/your-org/{CRATE}/actions)
-[![crates.io](https://img.shields.io/crates/v/{CRATE}.svg)](https://crates.io/crates/{CRATE})
-```
-
-The `{CRATE}` placeholder will be replaced with the actual crate name.
-
-**Footer Template Example** (`readme-footer.md`):
-
-```markdown
-## License
-
-Licensed under the MIT License.
-```
-
-Run `captain init` to create empty templates that you can customize.
-
-### Template Priority
-
-For `README.md.in` templates (main content):
-
-1. Custom directory specified via `--template-dir` (if provided)
-2. Crate's own `README.md.in` file (in the crate directory)
-3. Workspace-level `README.md.in` (for the workspace README)
-
-## Git Hooks Setup
-
-After running `captain init`, install the git hooks:
+Then install the hooks:
 
 ```bash
 ./hooks/install.sh
 ```
 
-This installs hooks that:
-- **pre-commit**: Runs `captain` to auto-generate and stage files
-- **pre-push**: Runs `captain pre-push` for comprehensive validation
+## Usage
 
-The hooks are installed to the main repo and all worktrees.
+### Pre-commit (default command)
+
+```bash
+captain
+```
+
+Runs all pre-commit checks, formats code, generates READMEs, and stages changes.
+
+### Pre-push
+
+```bash
+captain pre-push
+```
+
+Runs clippy, tests, doc builds, and cargo-shear on affected crates.
+
+### Skip slow checks (emergency escape hatch)
+
+```bash
+HAVE_MERCY=1 git push   # Skip tests, doc-tests, docs
+HAVE_MERCY=2 git push   # Also skip clippy
+HAVE_MERCY=3 git push   # Skip everything
+```
+
+### Debug workspace info
+
+```bash
+captain debug-packages
+```
 
 ## Configuration
 
-Captain is configured via `.config/captain/config.styx`:
+Captain uses [Styx](https://github.com/bearcove/styx) configuration at `.config/captain/config.styx`:
 
 ```styx
-@schema {source crate:captain-cli@1, cli captain}
-
-// Captain configuration
-// All options default to true. Set to false to disable.
+@schema {id crate:captain-config@1, cli captain}
 
 pre-commit {
-  generate-readmes false
-  rustfmt false
-  cargo-lock false
+  // All default to true
+  generate-readmes true
+  rustfmt true
+  cargo-lock true
+  arborium true
+  edition-2024 true
+  external-path-deps true
 }
 
 pre-push {
-  clippy false
-  nextest false
-  doc-tests false
-  docs false
-  cargo-shear false
+  clippy true
+  nextest true
+  doc-tests false        // Disabled by default
+  docs true
+  cargo-shear true
 
-  // Feature configuration
-  clippy-features (feature1 feature2)
-  doc-test-features (feature1)
-  docs-features (feature1)
+  // Optional: specify features instead of --all-features
+  // clippy-features (feature1 feature2)
+  // doc-test-features (feature1)
+  // docs-features (feature1)
 }
 ```
 
-### Available Options
+### Pre-commit Options
 
-All options default to `true`. Set to `false` to disable.
+| Option | Default | Description |
+|--------|---------|-------------|
+| `generate-readmes` | `true` | Generate `README.md` from templates |
+| `rustfmt` | `true` | Format staged Rust files |
+| `cargo-lock` | `true` | Stage `Cargo.lock` changes |
+| `arborium` | `true` | Set up arborium syntax highlighting |
+| `edition-2024` | `true` | Require Rust edition 2024 |
+| `external-path-deps` | `true` | Check for external path dependencies |
 
-#### Pre-commit Options (in `pre-commit { }` block)
+### Pre-push Options
 
-| Option | Description |
-|--------|-------------|
-| `generate-readmes` | Generate `README.md` files from templates |
-| `rustfmt` | Run `cargo fmt` to format code |
-| `cargo-lock` | Stage `Cargo.lock` changes |
-| `arborium` | Set up arborium syntax highlighting for docs |
-| `rust-version` | Enforce consistent MSRV across crates |
-| `edition-2024` | Require Rust edition 2024 |
+| Option | Default | Description |
+|--------|---------|-------------|
+| `clippy` | `true` | Run clippy with `-D warnings` |
+| `nextest` | `true` | Run tests via cargo-nextest |
+| `doc-tests` | `false` | Run documentation tests |
+| `docs` | `true` | Build docs with `-D warnings` |
+| `cargo-shear` | `true` | Check for unused dependencies |
+| `clippy-features` | - | Features for clippy (omit for `--all-features`) |
+| `doc-test-features` | - | Features for doc tests |
+| `docs-features` | - | Features for rustdoc |
 
-#### Pre-push Options (in `pre-push { }` block)
+## README Templates
 
-| Option | Description |
-|--------|-------------|
-| `clippy` | Run `cargo clippy` with warnings as errors |
-| `nextest` | Run tests via `cargo nextest` |
-| `doc-tests` | Run documentation tests |
-| `docs` | Build documentation with warnings as errors |
-| `cargo-shear` | Check for unused dependencies |
-| `clippy-features` | Features to pass to clippy (child node with args) |
-| `doc-test-features` | Features to pass to doc tests (child node with args) |
-| `docs-features` | Features to pass to rustdoc (child node with args) |
+### Template Structure
 
-## Notes
+Each crate can have a `README.md.in` file. The generated `README.md` combines:
 
-### Automatic Staging
+1. **Header** from `.config/captain/readme-templates/readme-header.md`
+2. **Content** from the crate's `README.md.in`
+3. **Footer** from `.config/captain/readme-templates/readme-footer.md`
 
-When captain runs, it automatically stages all generated files with `git add`.
-If captain is updated mid-development, the new changes might appear in an unrelated PR.
-This is by design—keep captain stable during active work.
+### Placeholders
 
-### Workspace Requirements
+Use `{CRATE}` in header/footer templates - it's replaced with the crate name:
 
-Your project should:
-- Be a Rust workspace or single crate with `Cargo.toml`
-- Have git initialized
-- Have `README.md.in` template files for any crates you want documented
+```markdown
+# {CRATE}
+
+[![crates.io](https://img.shields.io/crates/v/{CRATE}.svg)](https://crates.io/crates/{CRATE})
+```
+
+### Custom Template Directory
+
+```bash
+captain --template-dir /path/to/templates
+```
+
+Looks for `{crate_name}.md.in` files in the specified directory.
+
+### Disable for specific crates
+
+Add to a crate's `Cargo.toml`:
+
+```toml
+[package.metadata.captain]
+generate-readmes = false
+```
+
+## Logging
+
+Set `RUST_LOG` for debug output:
+
+```bash
+RUST_LOG=captain=debug captain
+RUST_LOG=captain=trace captain  # Very verbose
+```
