@@ -55,100 +55,97 @@ pub fn collect_readme_jobs(
     let custom_footer = find_template("readme-footer.md");
 
     // Helper function to process a README template
-    let process_readme_template = |template_path: &Path,
-                                   output_dir: &Path,
-                                   crate_name: &str|
-     -> Option<Job> {
-        if !template_path.exists() {
-            error!(
-                "🚫 {} Please add a README.md.in template here that describes what this crate is for:\n   {}",
-                "Missing template!".red().bold(),
-                template_path.display().yellow()
-            );
-            return None;
-        }
-
-        // Read the template file
-        let template_input = match fs::read_to_string(template_path) {
-            Ok(s) => s,
-            Err(e) => {
-                error!("Failed to read template {}: {e}", template_path.display());
+    let process_readme_template =
+        |template_path: &Path, output_dir: &Path, crate_name: &str| -> Option<Job> {
+            if !template_path.exists() {
+                error!(
+                    "🚫 Missing README template: {}",
+                    template_path.display().yellow()
+                );
                 return None;
             }
-        };
 
-        let readme_content = readme::generate(readme::GenerateReadmeOpts {
-            crate_name: crate_name.to_string(),
-            input: template_input,
-            header: custom_header.clone(),
-            footer: custom_footer.clone(),
-        });
+            // Read the template file
+            let template_input = match fs::read_to_string(template_path) {
+                Ok(s) => s,
+                Err(e) => {
+                    error!("Failed to read template {}: {e}", template_path.display());
+                    return None;
+                }
+            };
 
-        let readme_path = output_dir.join("README.md");
+            let readme_content = readme::generate(readme::GenerateReadmeOpts {
+                crate_name: crate_name.to_string(),
+                input: template_input,
+                header: custom_header.clone(),
+                footer: custom_footer.clone(),
+            });
 
-        // Check if this README is staged and would be modified
-        if staged_files.clean.contains(&readme_path) {
-            // Get the relative path for git commands (git show doesn't like absolute paths)
-            let relative_path = readme_path
-                .strip_prefix(&workspace_dir)
-                .unwrap_or(&readme_path);
+            let readme_path = output_dir.join("README.md");
 
-            // Get the staged content
-            let staged_content = command_with_color("git")
-                .args(["show", &format!(":{}", relative_path.display())])
-                .output()
-                .ok()
-                .filter(|o| o.status.success())
-                .map(|o| o.stdout);
+            // Check if this README is staged and would be modified
+            if staged_files.clean.contains(&readme_path) {
+                // Get the relative path for git commands (git show doesn't like absolute paths)
+                let relative_path = readme_path
+                    .strip_prefix(&workspace_dir)
+                    .unwrap_or(&readme_path);
 
-            if let Some(staged) = staged_content {
-                let new_content_bytes = readme_content.as_bytes();
-                if staged != new_content_bytes {
-                    // The staged version differs from what we would generate!
-                    error!("");
-                    error!("{}", "❌ GENERATED FILE CONFLICT DETECTED".red().bold());
-                    error!("");
-                    error!(
-                        "You modified {} directly, but this file is auto-generated.",
-                        readme_path.display().yellow()
-                    );
-                    error!("This pre-commit hook would overwrite your changes.");
-                    error!("");
-                    error!(
-                        "{} Edit {} instead (the template source)",
-                        "→".cyan(),
-                        template_path.display().yellow()
-                    );
-                    error!("");
-                    error!("{}", "To fix this:".cyan().bold());
-                    error!("  1. Undo changes to the generated file:");
-                    error!("     git restore --staged {}", readme_path.display());
-                    error!("     git restore {}", readme_path.display());
-                    error!("");
-                    error!("  2. OR edit the template and regenerate:");
-                    error!("     # Edit {}", template_path.display());
-                    error!("     cargo run --release  # regenerate");
-                    error!(
-                        "     git add {}  # stage the generated file",
-                        readme_path.display()
-                    );
-                    error!("");
-                    error!("Refusing to commit until this conflict is resolved.");
-                    std::process::exit(1);
+                // Get the staged content
+                let staged_content = command_with_color("git")
+                    .args(["show", &format!(":{}", relative_path.display())])
+                    .output()
+                    .ok()
+                    .filter(|o| o.status.success())
+                    .map(|o| o.stdout);
+
+                if let Some(staged) = staged_content {
+                    let new_content_bytes = readme_content.as_bytes();
+                    if staged != new_content_bytes {
+                        // The staged version differs from what we would generate!
+                        error!("");
+                        error!("{}", "❌ GENERATED FILE CONFLICT DETECTED".red().bold());
+                        error!("");
+                        error!(
+                            "You modified {} directly, but this file is auto-generated.",
+                            readme_path.display().yellow()
+                        );
+                        error!("This pre-commit hook would overwrite your changes.");
+                        error!("");
+                        error!(
+                            "{} Edit {} instead (the template source)",
+                            "→".cyan(),
+                            template_path.display().yellow()
+                        );
+                        error!("");
+                        error!("{}", "To fix this:".cyan().bold());
+                        error!("  1. Undo changes to the generated file:");
+                        error!("     git restore --staged {}", readme_path.display());
+                        error!("     git restore {}", readme_path.display());
+                        error!("");
+                        error!("  2. OR edit the template and regenerate:");
+                        error!("     # Edit {}", template_path.display());
+                        error!("     cargo run --release  # regenerate");
+                        error!(
+                            "     git add {}  # stage the generated file",
+                            readme_path.display()
+                        );
+                        error!("");
+                        error!("Refusing to commit until this conflict is resolved.");
+                        std::process::exit(1);
+                    }
                 }
             }
-        }
 
-        let old_content = fs::read(&readme_path).ok();
+            let old_content = fs::read(&readme_path).ok();
 
-        Some(Job {
-            path: readme_path,
-            old_content,
-            new_content: readme_content.into_bytes(),
-            #[cfg(unix)]
-            executable: false,
-        })
-    };
+            Some(Job {
+                path: readme_path,
+                old_content,
+                new_content: readme_content.into_bytes(),
+                #[cfg(unix)]
+                executable: false,
+            })
+        };
 
     for crate_path in crate_dirs {
         if !crate_path.is_dir()
