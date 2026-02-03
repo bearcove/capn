@@ -58,7 +58,7 @@ cargo install captain
 ### From source
 
 ```bash
-cargo install --git https://github.com/bearcove/captain
+cargo install --git https://github.com/bearcove/captain captain
 ```
 
 ## Quick Start
