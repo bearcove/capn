@@ -1,24 +1,33 @@
-use rayon::prelude::*;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use walkdir::WalkDir;
 
-/// Calculate directory size recursively using walkdir + rayon (returns bytes)
+/// Calculate directory size recursively (returns bytes).
 pub fn dir_size(path: &Path) -> u64 {
+    dir_size_with_cancel(path, &AtomicBool::new(false))
+}
+
+/// Calculate directory size recursively with cancellation support (returns bytes).
+///
+/// Checks the `cancelled` flag during traversal and returns the partial sum
+/// accumulated so far if cancellation is requested.
+pub fn dir_size_with_cancel(path: &Path, cancelled: &AtomicBool) -> u64 {
     if !path.exists() {
         return 0;
     }
 
-    // Collect all file entries first, then sum in parallel
-    let entries: Vec<_> = WalkDir::new(path)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
-        .collect();
-
-    entries
-        .par_iter()
-        .map(|entry| entry.metadata().map(|m| m.len()).unwrap_or(0))
-        .sum()
+    let mut total: u64 = 0;
+    for entry in WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
+        if cancelled.load(Ordering::Relaxed) {
+            break;
+        }
+        if entry.file_type().is_file()
+            && let Ok(meta) = entry.metadata()
+        {
+            total += meta.len();
+        }
+    }
+    total
 }
 
 /// Format bytes as human-readable size

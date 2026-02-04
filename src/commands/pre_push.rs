@@ -2,7 +2,7 @@
 
 use crate::maybe_strip_bytes;
 use crate::task::{TaskHandle, TaskResult, TaskRunner, UnitResult};
-use crate::utils::{dir_size, format_size};
+use crate::utils::{dir_size_with_cancel, format_size};
 use captain_config::CaptainConfig;
 use cargo_metadata::Metadata;
 use owo_colors::OwoColorize;
@@ -107,8 +107,8 @@ pub fn run_pre_push(config: CaptainConfig) {
         compute_affected_crates_task,
     );
 
-    // Background task: measure target directory size
-    runner.add("target size", target_size_task);
+    // Background task: measure target directory size (cancelled if all checks finish first)
+    runner.add_background("target size", target_size_task);
 
     // Workspace-wide checks (no deps on affected crates)
     if config.pre_push.clippy {
@@ -194,13 +194,18 @@ pub struct TargetSizeInfo {
     pub size: u64,
 }
 
-fn target_size_task(_handle: &TaskHandle) -> TaskResult<TargetSizeInfo> {
+fn target_size_task(handle: &TaskHandle) -> TaskResult<TargetSizeInfo> {
     // Use the shared target directory if set, otherwise default
     let target_dir = std::env::var("CARGO_TARGET_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("target"));
 
-    let size = dir_size(&target_dir);
+    let size = dir_size_with_cancel(&target_dir, handle.cancellation_token());
+
+    if handle.is_cancelled() {
+        return TaskResult::skipped("cancelled");
+    }
+
     TaskResult::success(TargetSizeInfo {
         path: target_dir,
         size,

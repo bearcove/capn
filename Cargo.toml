@@ -37,7 +37,6 @@ toml_edit = "0.24"
 supports-color = "3.0.2"
 strip-ansi-escapes = "0.2.1"
 walkdir = "2"
-rayon = "1"
 indicatif = "0.18"
 
 [build-dependencies]
