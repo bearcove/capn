@@ -1,0 +1,7 @@
+[package]
+name = "my-crate"
+version = "0.1.0"
+edition = "2024"
+
+[target.'cfg(unix)'.dev-dependencies]
+my-internal.workspace = true

@@ -1,0 +1,6 @@
+[workspace]
+members = ["my-crate", "my-internal"]
+resolver = "2"
+
+[workspace.dependencies]
+my-internal = { path = "my-internal", version = "0.1.0" }

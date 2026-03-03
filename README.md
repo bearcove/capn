@@ -130,6 +130,7 @@ pre-commit {
   arborium true
   edition-2024 true
   external-path-deps true
+  internal-dev-deps-release-plz true
 }
 
 pre-push {
@@ -156,6 +157,7 @@ pre-push {
 | `arborium` | `true` | Set up arborium syntax highlighting |
 | `edition-2024` | `true` | Require Rust edition 2024 |
 | `external-path-deps` | `true` | Check for external path dependencies |
+| `internal-dev-deps-release-plz` | `true` | Forbid internal dev-deps with `workspace = true` or `path` + `version` |
 
 ### Pre-push Options
 

@@ -9,7 +9,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 
-use crate::checks::{check_edition_2024, check_external_path_deps};
+use crate::checks::{
+    check_edition_2024, check_external_path_deps, check_internal_dev_deps_release_plz,
+};
 use crate::jobs::Job;
 use crate::task::{TaskHandle, TaskResult, TaskRunner, UnitResult};
 
@@ -29,6 +31,14 @@ pub fn run_pre_commit(config: CaptainConfig, template_dir: Option<PathBuf>) {
 
     if config.pre_commit.external_path_deps {
         runner.add_dep1("external-deps", metadata_id, external_path_deps_task);
+    }
+
+    if config.pre_commit.internal_dev_deps_release_plz {
+        runner.add_dep1(
+            "internal-dev-deps-release-plz",
+            metadata_id,
+            internal_dev_deps_release_plz_task,
+        );
     }
 
     // Jobs that depend on staged files only
@@ -115,6 +125,13 @@ fn edition_2024_task(_handle: &TaskHandle, metadata: Arc<Metadata>) -> UnitResul
 
 fn external_path_deps_task(_handle: &TaskHandle, metadata: Arc<Metadata>) -> UnitResult {
     match check_external_path_deps(&metadata) {
+        Ok(()) => TaskResult::success(()),
+        Err(e) => TaskResult::failed(e.summary, e.details),
+    }
+}
+
+fn internal_dev_deps_release_plz_task(_handle: &TaskHandle, metadata: Arc<Metadata>) -> UnitResult {
+    match check_internal_dev_deps_release_plz(&metadata) {
         Ok(()) => TaskResult::success(()),
         Err(e) => TaskResult::failed(e.summary, e.details),
     }

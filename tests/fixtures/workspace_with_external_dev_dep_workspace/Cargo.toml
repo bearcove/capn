@@ -1,0 +1,6 @@
+[workspace]
+members = ["my-crate"]
+resolver = "2"
+
+[workspace.dependencies]
+serde = "1"

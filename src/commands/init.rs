@@ -181,6 +181,8 @@ pre-commit {
   // cargo-lock false
   // arborium false
   // edition-2024 false
+  // external-path-deps false
+  // internal-dev-deps-release-plz false
 }
 
 pre-push {

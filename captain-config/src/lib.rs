@@ -44,6 +44,10 @@ pub struct PreCommitConfig {
     /// These are typically local development overrides that should not be committed.
     #[facet(default = true)]
     pub external_path_deps: bool,
+
+    /// Check for internal dev-dependencies that can break release-plz.
+    #[facet(default = true)]
+    pub internal_dev_deps_release_plz: bool,
 }
 
 /// Configuration for pre-push hooks.
