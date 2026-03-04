@@ -20,13 +20,19 @@ rustdoc-args = ["--html-in-header", "arborium-header.html"]
 
 
 [dependencies]
-captain-config = { path = "captain-config" }
+captain-config = { version = "1.4.0", path = "captain-config" }
 cargo_metadata = "0.23.1"
 dirs = "6"
-facet = { git = "https://github.com/facet-rs/facet", branch = "main" }
-facet-styx = { git = "https://github.com/bearcove/styx", branch = "main", features = ["figue"] }
-figue = { git = "https://github.com/bearcove/figue", branch = "main" }
-styx-embed = { git = "https://github.com/bearcove/styx", branch = "main" }
+
+# facet
+facet = { version = "0.44" }
+
+# styx
+facet-styx = { version = "2.0.0", features = ["figue"] }
+styx-embed = { version = "2.0.0" }
+
+# figue
+figue = { version = "2.0.0" }
 
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -38,8 +44,8 @@ walkdir = "2"
 indicatif = "0.18"
 
 [build-dependencies]
-captain-config = { path = "captain-config" }
-facet-styx = { git = "https://github.com/bearcove/styx", branch = "main" }
+captain-config = { version = "1.4.0", path = "captain-config" }
+facet-styx = { version = "2.0.0" }
 
 [dev-dependencies]
 

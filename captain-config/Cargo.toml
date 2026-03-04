@@ -2,6 +2,8 @@
 name = "captain-config"
 version = "1.4.0"
 edition = "2024"
+description = "Configuration types for captain"
+license = "MIT OR Apache-2.0"
 
 [package.metadata]
 
@@ -9,8 +11,8 @@ edition = "2024"
 rustdoc-args = ["--html-in-header", "arborium-header.html"]
 
 [dependencies]
-facet = { git = "https://github.com/facet-rs/facet", branch = "main" }
-facet-default = { git = "https://github.com/facet-rs/facet", branch = "main" }
+facet = { version = "0.44.1" }
+facet-default = { version = "0.44.1" }
 
 [package.metadata.cargo-shear]
 ignored = ["facet-default"]
