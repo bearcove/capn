@@ -20,8 +20,9 @@ pub struct CaptainConfig {
 #[derive(Debug, Clone, facet::Facet)]
 #[facet(rename_all = "kebab-case", traits(Default), derive(Default))]
 pub struct PreCommitConfig {
-    /// Generate `README.md` files from `README.md.in` templates.
-    #[facet(default = true)]
+    /// Deprecated: README generation has been removed from captain.
+    /// If enabled, captain will print a recommendation to use `cargo-reedme`.
+    #[facet(default = false)]
     pub generate_readmes: bool,
 
     /// Format staged Rust files with `rustfmt`.

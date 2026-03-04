@@ -4,7 +4,6 @@ use facet_styx::StyxFormat;
 use figue::{self as args, Driver};
 use std::borrow::Cow;
 use std::ffi::OsStr;
-use std::path::PathBuf;
 use std::process::Command;
 use supports_color::{self, Stream as ColorStream};
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
@@ -12,7 +11,6 @@ use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 mod checks;
 mod commands;
 mod jobs;
-mod readme;
 mod task;
 mod utils;
 
@@ -43,11 +41,7 @@ struct Args {
 #[repr(u8)]
 enum Commands {
     /// Run pre-commit checks (default when no command specified)
-    PreCommit {
-        /// Template directory for README generation
-        #[facet(default, args::named)]
-        template_dir: Option<PathBuf>,
-    },
+    PreCommit,
     /// Run pre-push checks
     PrePush,
     /// Initialize captain hooks in the repository
@@ -121,11 +115,11 @@ fn main() {
         Some(Commands::Clean) => {
             run_clean();
         }
-        Some(Commands::PreCommit { template_dir }) => {
-            run_pre_commit(args.config, template_dir);
+        Some(Commands::PreCommit) => {
+            run_pre_commit(args.config);
         }
         None => {
-            run_pre_commit(args.config, None);
+            run_pre_commit(args.config);
         }
     }
 }

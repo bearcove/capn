@@ -15,8 +15,15 @@ use crate::checks::{
 use crate::jobs::Job;
 use crate::task::{TaskHandle, TaskResult, TaskRunner, UnitResult};
 
-pub fn run_pre_commit(config: CaptainConfig, template_dir: Option<PathBuf>) {
+pub fn run_pre_commit(config: CaptainConfig) {
     let start_time = std::time::Instant::now();
+    if config.pre_commit.generate_readmes {
+        eprintln!(
+            "{}",
+            "⚠ `pre-commit.generate-readmes` is deprecated and ignored. Use `cargo-reedme` instead."
+                .yellow()
+        );
+    }
 
     let mut runner = TaskRunner::new();
 
@@ -53,19 +60,6 @@ pub fn run_pre_commit(config: CaptainConfig, template_dir: Option<PathBuf>) {
 
     if config.pre_commit.arborium {
         runner.add_dep1("arborium", metadata_id, arborium_task);
-    }
-
-    // Jobs that depend on both metadata and staged files
-    if config.pre_commit.generate_readmes {
-        let template_dir = template_dir.map(Arc::new);
-        runner.add_dep2(
-            "readmes",
-            metadata_id,
-            staged_id,
-            move |handle, metadata, staged| {
-                readmes_task(handle, metadata, staged, template_dir.clone())
-            },
-        );
     }
 
     // Run all tasks
@@ -149,20 +143,6 @@ fn cargo_lock_task(_handle: &TaskHandle) -> UnitResult {
 
 fn arborium_task(_handle: &TaskHandle, metadata: Arc<Metadata>) -> UnitResult {
     let jobs = crate::jobs::collect_arborium_jobs(&metadata);
-    TaskResult::success_with_jobs((), jobs)
-}
-
-fn readmes_task(
-    _handle: &TaskHandle,
-    metadata: Arc<Metadata>,
-    staged: Arc<StagedFiles>,
-    template_dir: Option<Arc<PathBuf>>,
-) -> UnitResult {
-    let jobs = crate::jobs::collect_readme_jobs(
-        template_dir.as_deref().map(|p| p.as_path()),
-        &staged,
-        &metadata,
-    );
     TaskResult::success_with_jobs((), jobs)
 }
 

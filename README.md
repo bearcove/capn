@@ -5,7 +5,7 @@
 [![MIT/Apache-2.0 licensed](https://img.shields.io/crates/l/captain.svg)](./LICENSE)
 
 **captain** is a development automation tool for Rust workspaces.
-It runs as pre-commit and pre-push hooks, handling code formatting, README generation,
+It runs as pre-commit and pre-push hooks, handling code formatting
 and comprehensive validation before you push.
 
 > This project was originally forked from [facet-dev](https://github.com/facet-rs/facet-dev).
@@ -14,7 +14,6 @@ and comprehensive validation before you push.
 
 ### Pre-commit (runs on every commit)
 
-- **README Generation**: Generates `README.md` from `README.md.in` templates with customizable headers/footers
 - **Code Formatting**: Formats staged Rust files with `rustfmt` (edition 2024)
 - **Cargo.lock Staging**: Automatically stages lockfile changes
 - **Arborium Setup**: Configures [arborium](https://github.com/bearcove/arborium) syntax highlighting for rustdoc
@@ -74,8 +73,6 @@ This creates:
 - `hooks/install.sh` to install the hooks
 - `conductor.json` for [Conductor](https://www.conductor.build/) integration
 - `.config/captain/config.styx` configuration file
-- `.config/captain/readme-templates/` for header/footer templates
-- `README.md.in` template
 
 Then install the hooks:
 
@@ -91,7 +88,7 @@ Then install the hooks:
 captain
 ```
 
-Runs all pre-commit checks, formats code, generates READMEs, and stages changes.
+Runs all pre-commit checks, formats code, and stages changes.
 
 ### Pre-push
 
@@ -123,8 +120,9 @@ Captain uses [Styx](https://github.com/bearcove/styx) configuration at `.config/
 @schema {id crate:captain-config@1, cli captain}
 
 pre-commit {
-  // All default to true
-  generate-readmes true
+  // `generate-readmes` defaults to false and is deprecated/ignored.
+  // Enable it only to get a reminder to use cargo-reedme.
+  generate-readmes false
   rustfmt true
   cargo-lock true
   arborium true
@@ -151,7 +149,7 @@ pre-push {
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `generate-readmes` | `true` | Generate `README.md` from templates |
+| `generate-readmes` | `false` | Deprecated/ignored. If enabled, captain recommends `cargo-reedme` |
 | `rustfmt` | `true` | Format staged Rust files |
 | `cargo-lock` | `true` | Stage `Cargo.lock` changes |
 | `arborium` | `true` | Set up arborium syntax highlighting |
@@ -172,42 +170,10 @@ pre-push {
 | `doc-test-features` | - | Features for doc tests |
 | `docs-features` | - | Features for rustdoc |
 
-## README Templates
+## README Generation
 
-### Template Structure
-
-Each crate can have a `README.md.in` file. The generated `README.md` combines:
-
-1. **Header** from `.config/captain/readme-templates/readme-header.md`
-2. **Content** from the crate's `README.md.in`
-3. **Footer** from `.config/captain/readme-templates/readme-footer.md`
-
-### Placeholders
-
-Use `{CRATE}` in header/footer templates - it's replaced with the crate name:
-
-```markdown
-# {CRATE}
-
-[![crates.io](https://img.shields.io/crates/v/{CRATE}.svg)](https://crates.io/crates/{CRATE})
-```
-
-### Custom Template Directory
-
-```bash
-captain --template-dir /path/to/templates
-```
-
-Looks for `{crate_name}.md.in` files in the specified directory.
-
-### Disable for specific crates
-
-Add to a crate's `Cargo.toml`:
-
-```toml
-[package.metadata.captain]
-generate-readmes = false
-```
+Captain no longer generates `README.md` files.
+If you enable `pre-commit.generate-readmes = true`, captain prints a warning and recommends using `cargo-reedme` instead.
 
 ## Logging
 

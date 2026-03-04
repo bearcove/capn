@@ -1,6 +1,5 @@
 //! Captain initialization command.
 
-use crate::jobs::workspace_name_from_metadata_object;
 use owo_colors::OwoColorize;
 use std::fs;
 use std::io::{self, Write};
@@ -156,27 +155,23 @@ echo "All hooks installed successfully."
         println!("  {} Created conductor.json", "✔".green());
     }
 
-    // 3. Create .config/captain/ directory with config.styx and templates
+    // 3. Create .config/captain/ directory with config.styx
     println!();
     let captain_dir = workspace_dir.join(".config/captain");
     let config_path = captain_dir.join("config.styx");
-    let templates_dir = captain_dir.join("readme-templates");
 
     if !captain_dir.exists() {
-        if prompt_yes_no(
-            "Create .config/captain/ with config.styx and readme templates?",
-            true,
-        ) {
-            fs::create_dir_all(&templates_dir).expect("Failed to create captain config directory");
+        if prompt_yes_no("Create .config/captain/ with config.styx?", true) {
+            fs::create_dir_all(&captain_dir).expect("Failed to create captain config directory");
 
             // Create default config.styx
             let config_content = r#"@schema {id crate:captain-config@1, cli captain}
 
 // Captain configuration
-// All options default to true. Set to false to disable.
+// Most options default to true. Set to false to disable.
 
 pre-commit {
-  // generate-readmes false
+  // generate-readmes true // deprecated and ignored; use cargo-reedme
   // rustfmt false
   // cargo-lock false
   // arborium false
@@ -201,82 +196,9 @@ pre-push {
             fs::write(&config_path, config_content).expect("Failed to write config.styx");
             files_created.push(config_path);
             println!("  {} Created .config/captain/config.styx", "✔".green());
-
-            // Create empty header/footer templates
-            let header_path = templates_dir.join("readme-header.md");
-            let footer_path = templates_dir.join("readme-footer.md");
-
-            fs::write(&header_path, "").expect("Failed to write readme-header.md");
-            fs::write(&footer_path, "").expect("Failed to write readme-footer.md");
-
-            files_created.push(header_path);
-            files_created.push(footer_path);
-
-            println!(
-                "  {} Created .config/captain/readme-templates/readme-header.md",
-                "✔".green()
-            );
-            println!(
-                "  {} Created .config/captain/readme-templates/readme-footer.md",
-                "✔".green()
-            );
         }
     } else {
         println!("  {} .config/captain/ already exists, skipping", "ℹ".blue());
-    }
-
-    // 4. Create README.md.in template
-    println!();
-    let readme_in_path = workspace_dir.join("README.md.in");
-    if !readme_in_path.exists() {
-        if prompt_yes_no("Create README.md.in template?", true) {
-            // Try to get the package/workspace name
-            let name = if let Ok(metadata) = cargo_metadata::MetadataCommand::new().exec() {
-                workspace_name_from_metadata_object(&metadata).unwrap_or_else(|_| {
-                    workspace_dir
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("my-project")
-                        .to_string()
-                })
-            } else {
-                workspace_dir
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("my-project")
-                    .to_string()
-            };
-
-            let readme_content = format!(
-                r#"# {name}
-
-A Rust project.
-
-## Features
-
-- Feature 1
-- Feature 2
-
-## Installation
-
-```bash
-cargo install {name}
-```
-
-## Usage
-
-```bash
-{name} --help
-```
-"#
-            );
-            fs::write(&readme_in_path, readme_content).expect("Failed to write README.md.in");
-            files_created.push(readme_in_path);
-
-            println!("  {} Created README.md.in", "✔".green());
-        }
-    } else {
-        println!("  {} README.md.in already exists, skipping", "ℹ".blue());
     }
 
     println!();
@@ -291,8 +213,7 @@ cargo install {name}
             "  1. Run {} to install git hooks",
             "hooks/install.sh".cyan()
         );
-        println!("  2. Run {} to generate README.md", "captain".cyan());
-        println!("  3. Commit the new files");
+        println!("  2. Commit the new files");
     }
 }
 
