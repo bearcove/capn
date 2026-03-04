@@ -3,7 +3,7 @@
 use crate::maybe_strip_bytes;
 use crate::task::{TaskHandle, TaskResult, TaskRunner, UnitResult};
 use crate::utils::{dir_size_with_cancel, format_size};
-use captain_config::CaptainConfig;
+use capn_config::CapnConfig;
 use cargo_metadata::Metadata;
 use owo_colors::OwoColorize;
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -32,7 +32,7 @@ pub struct AffectedCrates {
     pub crate_to_files: HashMap<String, Vec<String>>,
 }
 
-pub fn run_pre_push(config: CaptainConfig) {
+pub fn run_pre_push(config: CapnConfig) {
     let mut config = config;
 
     // HAVE_MERCY levels:
@@ -173,7 +173,7 @@ pub fn run_pre_push(config: CaptainConfig) {
         };
         print!("📦 {} {}", path_display.dimmed(), size_colored);
         if is_large {
-            print!(" {}", "(cf. 'captain clean')".dimmed());
+            print!(" {}", "(cf. 'capn clean')".dimmed());
         }
         println!();
     }
@@ -554,7 +554,7 @@ fn docs_task(
 
 fn setup_shared_target_dir() {
     if let Some(home) = dirs::home_dir() {
-        let target_dir = home.join(".captain").join("target");
+        let target_dir = home.join(".capn").join("target");
         let _ = fs::create_dir_all(&target_dir);
         // SAFETY: We're single-threaded at this point
         unsafe { std::env::set_var("CARGO_TARGET_DIR", &target_dir) };

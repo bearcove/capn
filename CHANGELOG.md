@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Forked from [facet-dev](https://github.com/facet-rs/facet-dev) and renamed to captain
-- Updated all configuration keys from `facet-dev` to `captain`
+- Forked from [facet-dev](https://github.com/facet-rs/facet-dev) and renamed to capn
+- Updated all configuration keys from `facet-dev` to `capn`
 - Removed facet-specific branding and templates
 - Made the tool more generic for use with any Rust workspace

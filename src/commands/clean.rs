@@ -1,14 +1,14 @@
-//! Clean command to remove captain's shared target directory.
+//! Clean command to remove capn's shared target directory.
 
 use crate::utils::{TaskProgress, dir_size, format_size};
 use owo_colors::OwoColorize;
 use std::fs;
 use std::io::{self, Write};
 
-/// Run the clean command - removes captain's shared target directory
+/// Run the clean command - removes capn's shared target directory
 pub fn run_clean() {
     let target_dir = if let Some(home) = dirs::home_dir() {
-        home.join(".captain").join("target")
+        home.join(".capn").join("target")
     } else {
         eprintln!("{}", "Could not determine home directory".red());
         std::process::exit(1);
@@ -40,7 +40,7 @@ pub fn run_clean() {
         target_dir.display().to_string()
     };
 
-    println!("Captain's shared target directory:");
+    println!("Capn's shared target directory:");
     println!("  {} {}", path_display.cyan(), size_str.yellow().bold());
     println!();
 

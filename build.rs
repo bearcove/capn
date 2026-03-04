@@ -1,7 +1,7 @@
 fn main() {
-    facet_styx::GenerateSchema::<captain_config::CaptainConfig>::new()
-        .crate_name("captain-config")
+    facet_styx::GenerateSchema::<capn_config::CapnConfig>::new()
+        .crate_name("capn-config")
         .version("1")
-        .cli("captain")
+        .cli("capn")
         .write("schema.styx");
 }

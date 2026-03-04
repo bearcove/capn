@@ -1,2 +1,2 @@
 #!/bin/bash
-cargo run --release --quiet
+cargo run --release --quiet --bin capn

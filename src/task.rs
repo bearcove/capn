@@ -1,6 +1,6 @@
 //! Unified task system for checks and jobs.
 //!
-//! All work in captain (checks, jobs, etc.) runs as tasks that:
+//! All work in capn (checks, jobs, etc.) runs as tasks that:
 //! 1. Run in parallel (spawned in threads)
 //! 2. Report progress through the spinner infrastructure
 //! 3. Support typed dependencies between tasks

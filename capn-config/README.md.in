@@ -1,5 +1,5 @@
-# captain-config
+# capn-config
 
-Configuration types for captain.
+Configuration types for capn.
 
 This crate exists so that build.rs can generate schemas from the config types.

@@ -1,2 +1,2 @@
 #!/bin/bash
-cargo run --release --quiet -- pre-push
+cargo run --release --quiet --bin capn -- pre-push

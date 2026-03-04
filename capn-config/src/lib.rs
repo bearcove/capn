@@ -1,12 +1,12 @@
-//! Captain configuration types.
+//! Capn configuration types.
 //!
 //! This is a separate crate so build.rs can generate schemas from these types.
 
-/// Configuration read from `.config/captain/config.styx`
+/// Configuration read from `.config/capn/config.styx`
 #[derive(Debug, Clone, facet::Facet)]
 #[facet(derive(Default), traits(Default))]
 #[facet(rename_all = "kebab-case")]
-pub struct CaptainConfig {
+pub struct CapnConfig {
     /// Configuration for pre-commit hooks.
     #[facet(default)]
     pub pre_commit: PreCommitConfig,
@@ -20,8 +20,8 @@ pub struct CaptainConfig {
 #[derive(Debug, Clone, facet::Facet)]
 #[facet(rename_all = "kebab-case", traits(Default), derive(Default))]
 pub struct PreCommitConfig {
-    /// Deprecated: README generation has been removed from captain.
-    /// If enabled, captain will print a recommendation to use `cargo-reedme`.
+    /// Deprecated: README generation has been removed from capn.
+    /// If enabled, capn will print a recommendation to use `cargo-reedme`.
     #[facet(default = false)]
     pub generate_readmes: bool,
 

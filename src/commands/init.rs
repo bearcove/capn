@@ -1,4 +1,4 @@
-//! Captain initialization command.
+//! Capn initialization command.
 
 use owo_colors::OwoColorize;
 use std::fs;
@@ -9,9 +9,9 @@ use tracing::error;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
-/// Initialize captain in the current repository
+/// Initialize capn in the current repository
 pub fn run_init() {
-    println!("{}", "Captain initialization".cyan().bold());
+    println!("{}", "Capn initialization".cyan().bold());
     println!();
 
     let workspace_dir = std::env::current_dir().unwrap();
@@ -40,7 +40,7 @@ pub fn run_init() {
         // pre-commit hook
         let pre_commit_path = hooks_dir.join("pre-commit");
         let pre_commit_content = r#"#!/bin/bash
-captain
+capn
 "#;
         fs::write(&pre_commit_path, pre_commit_content).expect("Failed to write pre-commit hook");
         #[cfg(unix)]
@@ -57,7 +57,7 @@ captain
         // pre-push hook
         let pre_push_path = hooks_dir.join("pre-push");
         let pre_push_content = r#"#!/bin/bash
-captain pre-push
+capn pre-push
 "#;
         fs::write(&pre_push_path, pre_push_content).expect("Failed to write pre-push hook");
         #[cfg(unix)]
@@ -155,19 +155,19 @@ echo "All hooks installed successfully."
         println!("  {} Created conductor.json", "✔".green());
     }
 
-    // 3. Create .config/captain/ directory with config.styx
+    // 3. Create .config/capn/ directory with config.styx
     println!();
-    let captain_dir = workspace_dir.join(".config/captain");
-    let config_path = captain_dir.join("config.styx");
+    let capn_dir = workspace_dir.join(".config/capn");
+    let config_path = capn_dir.join("config.styx");
 
-    if !captain_dir.exists() {
-        if prompt_yes_no("Create .config/captain/ with config.styx?", true) {
-            fs::create_dir_all(&captain_dir).expect("Failed to create captain config directory");
+    if !capn_dir.exists() {
+        if prompt_yes_no("Create .config/capn/ with config.styx?", true) {
+            fs::create_dir_all(&capn_dir).expect("Failed to create capn config directory");
 
             // Create default config.styx
-            let config_content = r#"@schema {id crate:captain-config@1, cli captain}
+            let config_content = r#"@schema {id crate:capn-config@1, cli capn}
 
-// Captain configuration
+// Capn configuration
 // Most options default to true. Set to false to disable.
 
 pre-commit {
@@ -195,10 +195,10 @@ pre-push {
 "#;
             fs::write(&config_path, config_content).expect("Failed to write config.styx");
             files_created.push(config_path);
-            println!("  {} Created .config/captain/config.styx", "✔".green());
+            println!("  {} Created .config/capn/config.styx", "✔".green());
         }
     } else {
-        println!("  {} .config/captain/ already exists, skipping", "ℹ".blue());
+        println!("  {} .config/capn/ already exists, skipping", "ℹ".blue());
     }
 
     println!();

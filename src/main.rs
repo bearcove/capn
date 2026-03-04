@@ -1,4 +1,4 @@
-use captain_config::CaptainConfig;
+use capn_config::CapnConfig;
 use facet::Facet;
 use facet_styx::StyxFormat;
 use figue::{self as args, Driver};
@@ -18,7 +18,7 @@ mod utils;
 styx_embed::embed_outdir_file!("schema.styx");
 
 pub use commands::{StagedFiles, debug_packages};
-use commands::{run_clean, run_init, run_pre_commit, run_pre_push};
+use commands::{run_clean, run_init, run_migrate, run_pre_commit, run_pre_push};
 
 /// Git pre-commit and pre-push hooks for Rust projects.
 #[derive(Facet, Debug)]
@@ -31,9 +31,9 @@ struct Args {
     #[facet(default, args::subcommand)]
     command: Option<Commands>,
 
-    /// Configuration (from .config/captain/config.styx)
+    /// Configuration (from .config/capn/config.styx)
     #[facet(args::config)]
-    config: CaptainConfig,
+    config: CapnConfig,
 }
 
 /// Available commands
@@ -44,11 +44,13 @@ enum Commands {
     PreCommit,
     /// Run pre-push checks
     PrePush,
-    /// Initialize captain hooks in the repository
+    /// Initialize capn hooks in the repository
     Init,
+    /// Migrate legacy `.config/captain` to `.config/capn`
+    Migrate,
     /// Debug package detection
     DebugPackages,
-    /// Clean captain's shared target directory
+    /// Clean capn's shared target directory
     Clean,
 }
 
@@ -77,8 +79,7 @@ fn command_with_color<S: AsRef<OsStr>>(program: S) -> Command {
 
 fn main() {
     // Set up tracing with env filter (RUST_LOG)
-    let filter =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("captain=info"));
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("capn=info"));
     tracing_subscriber::registry()
         .with(fmt::layer().with_writer(std::io::stderr))
         .with(filter)
@@ -90,10 +91,10 @@ fn main() {
         .cli(|c| c.args(std::env::args().skip(1)))
         .file(|f| {
             f.format(StyxFormat)
-                .default_paths([".config/captain/config.styx"])
+                .default_paths([".config/capn/config.styx", ".config/captain/config.styx"])
         })
         .help(|h| {
-            h.program_name("captain")
+            h.program_name("capn")
                 .description("Git pre-commit and pre-push hooks for Rust projects")
                 .version(env!("CARGO_PKG_VERSION"))
         })
@@ -108,6 +109,9 @@ fn main() {
         }
         Some(Commands::Init) => {
             run_init();
+        }
+        Some(Commands::Migrate) => {
+            run_migrate();
         }
         Some(Commands::DebugPackages) => {
             debug_packages();

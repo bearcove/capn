@@ -1,16 +1,17 @@
 [workspace]
-members = ["captain-config", "xtask"]
+members = ["capn-config", "xtask"]
 
 [package]
-name = "captain"
+name = "capn"
 version = "1.4.0"
 edition = "2024"
+default-run = "capn"
 description = "Development automation tool for Rust workspaces"
 keywords = ["code-generation", "templates"]
 categories = ["development-tools"]
 rust-version = "1.89"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/bearcove/captain"
+repository = "https://github.com/bearcove/capn"
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--html-in-header", "arborium-header.html"]
@@ -20,7 +21,7 @@ rustdoc-args = ["--html-in-header", "arborium-header.html"]
 
 
 [dependencies]
-captain-config = { version = "1.4.0", path = "captain-config" }
+capn-config = { version = "1.4.0", path = "capn-config" }
 cargo_metadata = "0.23.1"
 dirs = "6"
 
@@ -44,7 +45,7 @@ walkdir = "2"
 indicatif = "0.18"
 
 [build-dependencies]
-captain-config = { version = "1.4.0", path = "captain-config" }
+capn-config = { version = "1.4.0", path = "capn-config" }
 facet-styx = { version = "2.0.0" }
 
 [dev-dependencies]

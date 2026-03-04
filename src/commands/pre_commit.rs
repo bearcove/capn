@@ -1,6 +1,6 @@
 //! Pre-commit hook implementation.
 
-use captain_config::CaptainConfig;
+use capn_config::CapnConfig;
 use cargo_metadata::Metadata;
 
 use owo_colors::OwoColorize;
@@ -15,7 +15,7 @@ use crate::checks::{
 use crate::jobs::Job;
 use crate::task::{TaskHandle, TaskResult, TaskRunner, UnitResult};
 
-pub fn run_pre_commit(config: CaptainConfig) {
+pub fn run_pre_commit(config: CapnConfig) {
     let start_time = std::time::Instant::now();
     if config.pre_commit.generate_readmes {
         eprintln!(

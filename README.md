@@ -1,10 +1,10 @@
-# captain
+# capn
 
-[![crates.io](https://img.shields.io/crates/v/captain.svg)](https://crates.io/crates/captain)
-[![documentation](https://docs.rs/captain/badge.svg)](https://docs.rs/captain)
-[![MIT/Apache-2.0 licensed](https://img.shields.io/crates/l/captain.svg)](./LICENSE)
+[![crates.io](https://img.shields.io/crates/v/capn.svg)](https://crates.io/crates/capn)
+[![documentation](https://docs.rs/capn/badge.svg)](https://docs.rs/capn)
+[![MIT/Apache-2.0 licensed](https://img.shields.io/crates/l/capn.svg)](./LICENSE)
 
-**captain** is a development automation tool for Rust workspaces.
+**capn** is a development automation tool for Rust workspaces.
 It runs as pre-commit and pre-push hooks, handling code formatting
 and comprehensive validation before you push.
 
@@ -39,40 +39,42 @@ tasks are cancelled immediately.
 On macOS and Linux:
 
 ```bash
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/bearcove/captain/releases/latest/download/captain-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/bearcove/capn/releases/latest/download/capn-installer.sh | sh
 ```
 
 On Windows (PowerShell):
 
 ```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://github.com/bearcove/captain/releases/latest/download/captain-installer.ps1 | iex"
+powershell -ExecutionPolicy ByPass -c "irm https://github.com/bearcove/capn/releases/latest/download/capn-installer.ps1 | iex"
 ```
 
 ### From crates.io
 
 ```bash
-cargo install captain
+cargo install capn
 ```
+
+This installs both `capn` and a `captain` compatibility shim that forwards to `capn`.
 
 ### From source
 
 ```bash
-cargo install --git https://github.com/bearcove/captain
+cargo install --git https://github.com/bearcove/capn
 ```
 
 ## Quick Start
 
-Initialize captain in your project:
+Initialize capn in your project:
 
 ```bash
-captain init
+capn init
 ```
 
 This creates:
 - `hooks/pre-commit` and `hooks/pre-push` scripts
 - `hooks/install.sh` to install the hooks
 - `conductor.json` for [Conductor](https://www.conductor.build/) integration
-- `.config/captain/config.styx` configuration file
+- `.config/capn/config.styx` configuration file
 
 Then install the hooks:
 
@@ -85,7 +87,7 @@ Then install the hooks:
 ### Pre-commit (default command)
 
 ```bash
-captain
+capn
 ```
 
 Runs all pre-commit checks, formats code, and stages changes.
@@ -93,7 +95,7 @@ Runs all pre-commit checks, formats code, and stages changes.
 ### Pre-push
 
 ```bash
-captain pre-push
+capn pre-push
 ```
 
 Runs clippy, tests, doc builds, and cargo-shear on affected crates.
@@ -109,15 +111,15 @@ HAVE_MERCY=3 git push   # Skip everything
 ### Debug workspace info
 
 ```bash
-captain debug-packages
+capn debug-packages
 ```
 
 ## Configuration
 
-Captain uses [Styx](https://github.com/bearcove/styx) configuration at `.config/captain/config.styx`:
+Capn uses [Styx](https://github.com/bearcove/styx) configuration at `.config/capn/config.styx`:
 
 ```styx
-@schema {id crate:captain-config@1, cli captain}
+@schema {id crate:capn-config@1, cli capn}
 
 pre-commit {
   // `generate-readmes` defaults to false and is deprecated/ignored.
@@ -145,11 +147,14 @@ pre-push {
 }
 ```
 
+If you still have a legacy `.config/captain/`, run `capn migrate` to move it.
+When both exist, `.config/capn/` takes precedence.
+
 ### Pre-commit Options
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `generate-readmes` | `false` | Deprecated/ignored. If enabled, captain recommends `cargo-reedme` |
+| `generate-readmes` | `false` | Deprecated/ignored. If enabled, capn recommends `cargo-reedme` |
 | `rustfmt` | `true` | Format staged Rust files |
 | `cargo-lock` | `true` | Stage `Cargo.lock` changes |
 | `arborium` | `true` | Set up arborium syntax highlighting |
@@ -172,16 +177,16 @@ pre-push {
 
 ## README Generation
 
-Captain no longer generates `README.md` files.
-If you enable `pre-commit.generate-readmes = true`, captain prints a warning and recommends using `cargo-reedme` instead.
+Capn no longer generates `README.md` files.
+If you enable `pre-commit.generate-readmes = true`, capn prints a warning and recommends using `cargo-reedme` instead.
 
 ## Logging
 
 Set `RUST_LOG` for debug output:
 
 ```bash
-RUST_LOG=captain=debug captain
-RUST_LOG=captain=trace captain  # Very verbose
+RUST_LOG=capn=debug capn
+RUST_LOG=capn=trace capn  # Very verbose
 ```
 
 ## License

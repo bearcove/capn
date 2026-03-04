@@ -117,10 +117,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "captain"
+name = "capn"
 version = "1.4.0"
 dependencies = [
- "captain-config",
+ "capn-config",
  "cargo_metadata",
  "dirs",
  "facet",
@@ -138,7 +138,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "captain-config"
+name = "capn-config"
 version = "1.4.0"
 dependencies = [
  "facet",

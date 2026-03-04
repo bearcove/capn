@@ -19,9 +19,9 @@ fn main() {
 }
 
 fn install() {
-    // Build release binary
+    // Build release binaries
     let status = Command::new("cargo")
-        .args(["build", "--release", "-p", "captain"])
+        .args(["build", "--release", "-p", "capn"])
         .status()
         .expect("Failed to run cargo build");
 
@@ -29,28 +29,37 @@ fn install() {
         std::process::exit(status.code().unwrap_or(1));
     }
 
-    let src = "target/release/captain";
-
-    // Copy to ~/.cargo/bin
     let home = std::env::var("HOME").expect("HOME not set");
-    let dst = format!("{}/.cargo/bin/captain", home);
+    let capn_src = "target/release/capn";
+    let capn_dst = format!("{}/.cargo/bin/capn", home);
+    std::fs::copy(capn_src, &capn_dst).expect("Failed to copy capn binary");
 
-    std::fs::copy(src, &dst).expect("Failed to copy binary");
+    let captain_src = "target/release/captain";
+    let captain_dst = format!("{}/.cargo/bin/captain", home);
+    std::fs::copy(captain_src, &captain_dst).expect("Failed to copy captain binary");
 
     // On macOS, codesign the installed binary to avoid AMFI issues
     // (signing must happen AFTER copy, not before)
     #[cfg(target_os = "macos")]
     {
-        println!("Signing installed binary...");
+        println!("Signing installed binaries...");
         let status = Command::new("codesign")
-            .args(["--sign", "-", "--force", &dst])
+            .args(["--sign", "-", "--force", &capn_dst])
             .status()
-            .expect("Failed to run codesign");
-
+            .expect("Failed to run codesign for capn");
         if !status.success() {
-            eprintln!("Warning: codesign failed, continuing anyway");
+            eprintln!("Warning: codesign failed for capn, continuing anyway");
+        }
+
+        let status = Command::new("codesign")
+            .args(["--sign", "-", "--force", &captain_dst])
+            .status()
+            .expect("Failed to run codesign for captain");
+        if !status.success() {
+            eprintln!("Warning: codesign failed for captain, continuing anyway");
         }
     }
 
-    println!("Installed captain to {}", dst);
+    println!("Installed capn to {}", capn_dst);
+    println!("Installed captain (compat shim) to {}", captain_dst);
 }
