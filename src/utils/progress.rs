@@ -116,7 +116,14 @@ pub struct TaskProgress {
 
 impl TaskProgress {
     pub fn new() -> Self {
-        let is_tty = std::io::stderr().is_terminal();
+        // lefthook (the Go git hook runner) unconditionally starts a PTY for
+        // child processes so their output is "colored", then io.Copy's the raw
+        // PTY output — including spinner redraw escape sequences — into its own
+        // reformatted display, producing garbage. It signals this situation by
+        // setting CLICOLOR_FORCE=true in the child environment. We use that as
+        // a proxy for "PTY-but-not-really-interactive, skip TUI".
+        let in_lefthook = std::env::var_os("CLICOLOR_FORCE").is_some();
+        let is_tty = !in_lefthook && std::io::stderr().is_terminal();
         Self {
             mp: if is_tty {
                 Some(MultiProgress::new())
