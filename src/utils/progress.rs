@@ -235,10 +235,13 @@ impl TaskProgress {
                     name: name.to_string(),
                 }
             }
-            None => TaskSpinner {
-                inner: SpinnerInner::Plain,
-                name: name.to_string(),
-            },
+            None => {
+                eprintln!("  … {}", name);
+                TaskSpinner {
+                    inner: SpinnerInner::Plain,
+                    name: name.to_string(),
+                }
+            }
         }
     }
 }
