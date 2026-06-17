@@ -2,12 +2,10 @@
 
 use crate::maybe_strip_bytes;
 use crate::task::{TaskHandle, TaskResult, TaskRunner, UnitResult};
-use crate::utils::{dir_size_with_cancel, format_size};
 use capn_config::CapnConfig;
 use cargo_metadata::Metadata;
 use owo_colors::OwoColorize;
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
@@ -90,9 +88,6 @@ pub fn run_pre_push(config: CapnConfig) {
         );
     }
 
-    // Set up shared target directory
-    setup_shared_target_dir();
-
     let mut runner = TaskRunner::new();
 
     // Root tasks with no dependencies
@@ -106,9 +101,6 @@ pub fn run_pre_push(config: CapnConfig) {
         git_id,
         compute_affected_crates_task,
     );
-
-    // Background task: measure target directory size (cancelled if all checks finish first)
-    runner.add_background("target size", target_size_task);
 
     // Workspace-wide checks (no deps on affected crates)
     if config.pre_push.clippy {
@@ -151,33 +143,6 @@ pub fn run_pre_push(config: CapnConfig) {
 
     println!();
 
-    // Print target directory size if available
-    if let Some(info) = results.get::<TargetSizeInfo>("target size") {
-        let size_str = format_size(info.size);
-        let fifty_gb = 50 * 1024 * 1024 * 1024;
-        let is_large = info.size > fifty_gb;
-        let size_colored = if is_large {
-            size_str.red().bold().to_string()
-        } else {
-            size_str.dimmed().to_string()
-        };
-        // Replace home dir with ~ for display
-        let path_display = if let Some(home) = dirs::home_dir() {
-            if let Ok(suffix) = info.path.strip_prefix(&home) {
-                format!("~/{}", suffix.display())
-            } else {
-                info.path.display().to_string()
-            }
-        } else {
-            info.path.display().to_string()
-        };
-        print!("📦 {} {}", path_display.dimmed(), size_colored);
-        if is_large {
-            print!(" {}", "(cf. 'capn clean')".dimmed());
-        }
-        println!();
-    }
-
     println!("{} {}", "✅".green(), "All checks passed!".green().bold());
 
     std::process::exit(0);
@@ -186,31 +151,6 @@ pub fn run_pre_push(config: CapnConfig) {
 // ============================================================================
 // Task functions
 // ============================================================================
-
-/// Result of target size calculation
-#[derive(Clone)]
-pub struct TargetSizeInfo {
-    pub path: PathBuf,
-    pub size: u64,
-}
-
-fn target_size_task(handle: &TaskHandle) -> TaskResult<TargetSizeInfo> {
-    // Use the shared target directory if set, otherwise default
-    let target_dir = std::env::var("CARGO_TARGET_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("target"));
-
-    let size = dir_size_with_cancel(&target_dir, handle.cancellation_token());
-
-    if handle.is_cancelled() {
-        return TaskResult::skipped("cancelled");
-    }
-
-    TaskResult::success(TargetSizeInfo {
-        path: target_dir,
-        size,
-    })
-}
 
 fn load_metadata_task(_handle: &TaskHandle) -> TaskResult<Metadata> {
     match cargo_metadata::MetadataCommand::new().exec() {
@@ -551,15 +491,6 @@ fn docs_task(
 // ============================================================================
 // Helper functions
 // ============================================================================
-
-fn setup_shared_target_dir() {
-    if let Some(home) = dirs::home_dir() {
-        let target_dir = home.join(".capn").join("target");
-        let _ = fs::create_dir_all(&target_dir);
-        // SAFETY: We're single-threaded at this point
-        unsafe { std::env::set_var("CARGO_TARGET_DIR", &target_dir) };
-    }
-}
 
 fn format_command_failure_ref(args: &[&str], output: &std::process::Output) -> String {
     let mut details = String::new();

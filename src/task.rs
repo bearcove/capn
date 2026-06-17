@@ -11,7 +11,7 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::thread;
 use std::time::Instant;
@@ -153,28 +153,17 @@ enum Event {
     Complete(u64, String, InternalResult),
 }
 
-/// Handle for a task to update its spinner message and check cancellation.
+/// Handle for a task to update its spinner message.
 #[derive(Clone)]
 pub struct TaskHandle {
     id: u64,
     event_tx: mpsc::Sender<Event>,
-    cancelled: Arc<AtomicBool>,
 }
 
 impl TaskHandle {
     /// Update the spinner message (e.g., "compiling foo...")
     pub fn set_message(&self, msg: impl Into<String>) {
         let _ = self.event_tx.send(Event::SetMessage(self.id, msg.into()));
-    }
-
-    /// Check if this task has been asked to cancel.
-    pub fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::Relaxed)
-    }
-
-    /// Get a reference to the cancellation token for passing to sub-functions.
-    pub fn cancellation_token(&self) -> &AtomicBool {
-        &self.cancelled
     }
 
     /// Run a command and update the spinner with the last line of output.
@@ -289,7 +278,6 @@ struct PendingTask {
     id: u64,
     name: String,
     deps: Vec<u64>,
-    background: bool,
     /// Creates the BoxedTask once dependencies are resolved
     #[allow(clippy::type_complexity)]
     make_task: Box<dyn FnOnce(&HashMap<u64, Box<dyn CloneAny>>) -> BoxedTask + Send>,
@@ -300,8 +288,6 @@ struct RunningTask {
     name: String,
     spinner: TaskSpinner,
     start: Instant,
-    background: bool,
-    cancelled: Arc<AtomicBool>,
 }
 
 /// Collected results from running all tasks.
@@ -341,18 +327,6 @@ impl TaskResults {
         }
         jobs
     }
-
-    /// Get a typed value from a successful task by name.
-    pub fn get<T: Clone + Send + Sync + 'static>(&self, name: &str) -> Option<Arc<T>> {
-        for (task_name, result) in &self.results {
-            if task_name == name
-                && let InternalResult::Success { value, .. } = result
-            {
-                return value.as_any().downcast_ref::<Arc<T>>().cloned();
-            }
-        }
-        None
-    }
 }
 
 /// Runs tasks in parallel with progress spinners and dependency resolution.
@@ -382,32 +356,6 @@ impl TaskRunner {
             id: id.raw(),
             name,
             deps: vec![],
-            background: false,
-            make_task: Box::new(move |_outputs| Box::new(move |handle| run_task(handle, task))),
-        });
-
-        id
-    }
-
-    /// Add a background task with no dependencies.
-    ///
-    /// Background tasks are non-essential work (e.g., computing target dir size).
-    /// They are automatically cancelled when all non-background tasks have completed,
-    /// or when any task fails. The task function should check `handle.is_cancelled()`
-    /// periodically and return early when cancelled.
-    pub fn add_background<T, F>(&mut self, name: impl Into<String>, task: F) -> TaskId<T>
-    where
-        T: Send + Sync + 'static,
-        F: FnOnce(&TaskHandle) -> TaskResult<T> + Send + 'static,
-    {
-        let id = TaskId::<T>::new();
-        let name = name.into();
-
-        self.pending.push(PendingTask {
-            id: id.raw(),
-            name,
-            deps: vec![],
-            background: true,
             make_task: Box::new(move |_outputs| Box::new(move |handle| run_task(handle, task))),
         });
 
@@ -434,7 +382,6 @@ impl TaskRunner {
             id: id.raw(),
             name,
             deps: vec![dep_id],
-            background: false,
             make_task: Box::new(move |outputs| {
                 let d1: Arc<D1> = outputs
                     .get(&dep_id)
@@ -473,7 +420,6 @@ impl TaskRunner {
             id: id.raw(),
             name,
             deps: vec![dep1_id, dep2_id],
-            background: false,
             make_task: Box::new(move |outputs| {
                 let d1: Arc<D1> = outputs
                     .get(&dep1_id)
@@ -577,17 +523,6 @@ impl TaskRunner {
                             }
                         }
                     }
-
-                    // Cancel background tasks if all essential work is done or failed
-                    let should_cancel_background =
-                        has_failure || running.values().all(|r| r.background);
-                    if should_cancel_background {
-                        for task in running.values() {
-                            if task.background {
-                                task.cancelled.store(true, Ordering::Relaxed);
-                            }
-                        }
-                    }
                 }
             }
         }
@@ -634,7 +569,6 @@ fn spawn_pending(
     let id = pending.id;
     let spinner = progress.add_task(&pending.name);
     let name = pending.name.clone();
-    let cancelled = Arc::new(AtomicBool::new(false));
 
     running.insert(
         id,
@@ -642,8 +576,6 @@ fn spawn_pending(
             name: pending.name,
             spinner,
             start: Instant::now(),
-            background: pending.background,
-            cancelled: Arc::clone(&cancelled),
         },
     );
 
@@ -654,7 +586,6 @@ fn spawn_pending(
         let handle = TaskHandle {
             id,
             event_tx: tx.clone(),
-            cancelled,
         };
         let result = task(&handle);
         let _ = tx.send(Event::Complete(id, name, result));

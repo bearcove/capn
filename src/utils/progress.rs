@@ -196,14 +196,6 @@ impl TaskSpinner {
             SpinnerInner::Plain => {}
         }
     }
-
-    /// Clear the spinner without showing any result
-    pub fn clear(&self) {
-        match &self.inner {
-            SpinnerInner::Tty(bar) => bar.finish_and_clear(),
-            SpinnerInner::Plain => {}
-        }
-    }
 }
 
 /// Manages multiple concurrent task spinners
@@ -297,6 +289,5 @@ mod tests {
             name: "test".into(),
         };
         s.skip("not needed");
-        s.clear();
     }
 }

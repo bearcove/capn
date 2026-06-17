@@ -23,7 +23,6 @@ rustdoc-args = ["--html-in-header", "arborium-header.html"]
 [dependencies]
 capn-config = { version = "1.4.0", path = "capn-config" }
 cargo_metadata = "0.23.1"
-dirs = "6"
 
 # facet
 facet = { version = "0.44" }
@@ -41,7 +40,6 @@ owo-colors = "4.2.3"
 toml_edit = "0.24"
 supports-color = "3.0.2"
 strip-ansi-escapes = "0.2.1"
-walkdir = "2"
 indicatif = "0.18"
 
 [build-dependencies]

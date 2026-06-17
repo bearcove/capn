@@ -1,13 +1,11 @@
 //! CLI command implementations.
 
-mod clean;
 mod debug_packages;
 mod init;
 mod migrate;
 mod pre_commit;
 mod pre_push;
 
-pub use clean::run_clean;
 pub use debug_packages::debug_packages;
 pub use init::run_init;
 pub use migrate::run_migrate;
