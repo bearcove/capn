@@ -59,7 +59,7 @@ This installs both `capn` and a `captain` compatibility shim that forwards to `c
 ### From source
 
 ```bash
-cargo install --git https://github.com/bearcove/capn
+cargo install --git https://github.com/bearcove/capn capn
 ```
 
 ## Quick Start
