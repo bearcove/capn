@@ -138,11 +138,14 @@ pub fn check_external_path_deps(metadata: &cargo_metadata::Metadata) -> Result<(
     Err(CheckError::new(summary).with_details(details))
 }
 
-/// Check for internal workspace dev-dependencies that confuse release-plz.
+/// Check for internal workspace dependencies that confuse release-plz.
 ///
 /// release-plz struggles with internal dev-dependencies that inherit `workspace = true`
 /// (which pulls in both path + version from workspace deps), or those that explicitly set
 /// both `path` and `version` in dev-dependencies.
+///
+/// Publishable packages also need every normal/build `path` dependency to specify
+/// `version`; otherwise Cargo rejects the publish before release-plz can continue.
 pub fn check_internal_dev_deps_release_plz(
     metadata: &cargo_metadata::Metadata,
 ) -> Result<(), CheckError> {
@@ -164,10 +167,15 @@ pub fn check_internal_dev_deps_release_plz(
         .with_details(format!("{}: {e}", root_manifest))
     })?;
 
-    let internal_workspace_deps = workspace_internal_dependency_paths(&root_doc);
-    if internal_workspace_deps.is_empty() {
-        return Ok(());
-    }
+    let workspace_deps = workspace_dependency_specs(&root_doc);
+    let internal_workspace_deps = workspace_deps
+        .iter()
+        .filter_map(|(dep_name, dep)| {
+            dep.path
+                .as_ref()
+                .map(|path| (dep_name.clone(), path.clone()))
+        })
+        .collect::<HashMap<_, _>>();
 
     let workspace_member_ids: HashSet<_> = metadata
         .workspace_members
@@ -228,6 +236,61 @@ pub fn check_internal_dev_deps_release_plz(
                 }
             }
         }
+
+        if package_is_publishable(&doc) {
+            if let Some(deps) = doc.get("dependencies").and_then(Item::as_table) {
+                collect_publishable_path_dep_violations(
+                    &mut violations,
+                    manifest_path.as_std_path(),
+                    "[dependencies]",
+                    deps,
+                    &workspace_deps,
+                );
+            }
+
+            if let Some(build_deps) = doc.get("build-dependencies").and_then(Item::as_table) {
+                collect_publishable_path_dep_violations(
+                    &mut violations,
+                    manifest_path.as_std_path(),
+                    "[build-dependencies]",
+                    build_deps,
+                    &workspace_deps,
+                );
+            }
+
+            if let Some(targets) = doc.get("target").and_then(Item::as_table) {
+                for (target_name, target_item) in targets {
+                    if let Some(target_table) = target_item.as_table() {
+                        if let Some(deps) =
+                            target_table.get("dependencies").and_then(Item::as_table)
+                        {
+                            let section = format!("[target.{target_name}.dependencies]");
+                            collect_publishable_path_dep_violations(
+                                &mut violations,
+                                manifest_path.as_std_path(),
+                                &section,
+                                deps,
+                                &workspace_deps,
+                            );
+                        }
+
+                        if let Some(build_deps) = target_table
+                            .get("build-dependencies")
+                            .and_then(Item::as_table)
+                        {
+                            let section = format!("[target.{target_name}.build-dependencies]");
+                            collect_publishable_path_dep_violations(
+                                &mut violations,
+                                manifest_path.as_std_path(),
+                                &section,
+                                build_deps,
+                                &workspace_deps,
+                            );
+                        }
+                    }
+                }
+            }
+        }
     }
 
     if violations.is_empty() {
@@ -236,26 +299,33 @@ pub fn check_internal_dev_deps_release_plz(
 
     let summary = format!(
         "{}",
-        "Internal dev-dependencies incompatible with release-plz detected!"
+        "Internal dependencies incompatible with release-plz detected!"
             .red()
             .bold()
     );
     let mut details = String::new();
-    details.push_str(
-        "Found internal workspace crates in dev-dependencies using unsupported forms:\n\n",
-    );
+    details.push_str("Found dependencies using release-plz-incompatible forms:\n\n");
     for violation in violations {
         details.push_str(&format!("  {} {}\n", "✗".red(), violation));
     }
     details.push_str(
         "\nUse path-only entries for internal dev-dependencies. Avoid `workspace = true`\n",
     );
-    details.push_str("and avoid `version` in dev-dependencies for internal workspace crates.");
+    details.push_str("and avoid `version` in dev-dependencies for internal workspace crates.\n");
+    details.push_str(
+        "For publishable normal/build dependencies, every `path` dependency must also specify `version`.",
+    );
 
     Err(CheckError::new(summary).with_details(details))
 }
 
-fn workspace_internal_dependency_paths(root_doc: &DocumentMut) -> HashMap<String, String> {
+#[derive(Clone, Debug, Default)]
+struct DependencySpec {
+    path: Option<String>,
+    has_version: bool,
+}
+
+fn workspace_dependency_specs(root_doc: &DocumentMut) -> HashMap<String, DependencySpec> {
     let mut internal = HashMap::new();
     let Some(workspace) = root_doc.get("workspace").and_then(Item::as_table) else {
         return internal;
@@ -265,9 +335,13 @@ fn workspace_internal_dependency_paths(root_doc: &DocumentMut) -> HashMap<String
     };
 
     for (dep_name, dep_item) in deps {
-        if let Some(path) = item_string_field(dep_item, "path") {
-            internal.insert(dep_name.to_owned(), path);
-        }
+        internal.insert(
+            dep_name.to_owned(),
+            DependencySpec {
+                path: item_string_field(dep_item, "path"),
+                has_version: item_has_field(dep_item, "version") || dep_item.as_str().is_some(),
+            },
+        );
     }
 
     internal
@@ -304,6 +378,60 @@ fn item_bool_field(item: &Item, key: &str) -> Option<bool> {
         .and_then(|v| v.as_inline_table())
         .and_then(|t| t.get(key))
         .and_then(|v| v.as_bool())
+}
+
+fn package_is_publishable(doc: &DocumentMut) -> bool {
+    let Some(package) = doc.get("package").and_then(Item::as_table) else {
+        return false;
+    };
+
+    let Some(publish) = package.get("publish") else {
+        return true;
+    };
+
+    if publish.as_bool() == Some(false) {
+        return false;
+    }
+
+    let is_empty_registry_list = publish
+        .as_value()
+        .and_then(|value| value.as_array())
+        .is_some_and(|registries| registries.is_empty());
+    !is_empty_registry_list
+}
+
+fn collect_publishable_path_dep_violations(
+    violations: &mut Vec<String>,
+    manifest_path: &Path,
+    section: &str,
+    deps: &toml_edit::Table,
+    workspace_deps: &HashMap<String, DependencySpec>,
+) {
+    for (dep_name, dep_item) in deps {
+        let has_workspace_true = item_bool_field(dep_item, "workspace").unwrap_or(false);
+
+        if has_workspace_true {
+            if let Some(workspace_dep) = workspace_deps.get(dep_name)
+                && workspace_dep.path.is_some()
+                && !workspace_dep.has_version
+            {
+                violations.push(format!(
+                    "{} {}: publishable dependency `{dep_name}.workspace = true` inherits an internal `path` dependency without `version` from [workspace.dependencies].",
+                    manifest_path.display(),
+                    section,
+                ));
+            }
+            continue;
+        }
+
+        if item_has_field(dep_item, "path") && !item_has_field(dep_item, "version") {
+            violations.push(format!(
+                "{} {}: publishable dependency `{dep_name}` sets `path` without `version`.",
+                manifest_path.display(),
+                section,
+            ));
+        }
+    }
 }
 
 fn collect_dev_dep_violations(
@@ -475,5 +603,51 @@ mod tests {
             "{:#?}",
             err.details
         );
+    }
+
+    #[test]
+    fn rejects_publishable_workspace_dependency_with_path_without_version() {
+        let metadata =
+            get_metadata_for_fixture("workspace_with_publishable_path_dep_missing_version");
+        let err = check_internal_dev_deps_release_plz(&metadata)
+            .expect_err("publishable path dependency without version should fail");
+
+        assert!(
+            err.details.contains("my-crate/Cargo.toml"),
+            "{:#?}",
+            err.details
+        );
+        assert!(err.details.contains("[dependencies]"), "{:#?}", err.details);
+        assert!(
+            err.details
+                .contains("inherits an internal `path` dependency without `version`"),
+            "{:#?}",
+            err.details
+        );
+    }
+
+    #[test]
+    fn rejects_publishable_direct_path_dependency_without_version() {
+        let metadata = get_metadata_for_fixture("workspace_with_direct_path_dep_missing_version");
+        let err = check_internal_dev_deps_release_plz(&metadata)
+            .expect_err("publishable direct path dependency without version should fail");
+
+        assert!(
+            err.details.contains("my-crate/Cargo.toml"),
+            "{:#?}",
+            err.details
+        );
+        assert!(
+            err.details.contains("sets `path` without `version`"),
+            "{:#?}",
+            err.details
+        );
+    }
+
+    #[test]
+    fn allows_private_workspace_dependency_with_path_without_version() {
+        let metadata = get_metadata_for_fixture("workspace_with_private_path_dep_missing_version");
+        let result = check_internal_dev_deps_release_plz(&metadata);
+        assert!(result.is_ok(), "{}", result.err().unwrap().details);
     }
 }

@@ -160,7 +160,7 @@ When both exist, `.config/capn/` takes precedence.
 | `arborium` | `true` | Set up arborium syntax highlighting |
 | `edition-2024` | `true` | Require Rust edition 2024 |
 | `external-path-deps` | `true` | Check for external path dependencies |
-| `internal-dev-deps-release-plz` | `true` | Forbid internal dev-deps with `workspace = true` or `path` + `version` |
+| `internal-dev-deps-release-plz` | `true` | Catch release-plz-incompatible internal deps |
 
 ### Pre-push Options
 
